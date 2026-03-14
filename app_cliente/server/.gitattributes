@@ -1,0 +1,8 @@
+# Ignorar bibliotecas JavaScript
+lib/js/** linguist-vendored
+
+# Ignorar arquivos gerados em Dart
+lib/generated/** linguist-generated
+*.g.dart linguist-generated
+
+*.js linguist-vendored

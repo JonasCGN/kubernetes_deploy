@@ -1,0 +1,191 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: evolution-postgres-data
+  namespace: braza-burger
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: evolution-redis-data
+  namespace: braza-burger
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: evolution-instances
+  namespace: braza-burger
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: evolution-postgres
+  namespace: braza-burger
+spec:
+  selector:
+    app: evolution-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evolution-postgres
+  namespace: braza-burger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: evolution-postgres
+  template:
+    metadata:
+      labels:
+        app: evolution-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: evolution_db
+            - name: POSTGRES_USER
+              value: evolution
+            - name: POSTGRES_PASSWORD
+              value: evolution123
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: evolution-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: evolution-redis
+  namespace: braza-burger
+spec:
+  selector:
+    app: evolution-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evolution-redis
+  namespace: braza-burger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: evolution-redis
+  template:
+    metadata:
+      labels:
+        app: evolution-redis
+    spec:
+      containers:
+        - name: redis
+          image: public.ecr.aws/docker/library/redis:7-alpine
+          args:
+            - redis-server
+            - --appendonly
+            - yes
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: evolution-redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: evolution-api
+  namespace: braza-burger
+spec:
+  selector:
+    app: evolution-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evolution-api
+  namespace: braza-burger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: evolution-api
+  template:
+    metadata:
+      labels:
+        app: evolution-api
+    spec:
+      containers:
+        - name: evolution-api
+          image: evoapicloud/evolution-api:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SERVER_PORT
+              value: "8080"
+            - name: DATABASE_CONNECTION_URI
+              value: postgresql://evolution:evolution123@evolution-postgres:5432/evolution_db?schema=evolution_api
+            - name: REDIS_URI
+              value: redis://evolution-redis:6379
+          envFrom:
+            - secretRef:
+                name: evolution-env
+          volumeMounts:
+            - name: evolution-instances
+              mountPath: /evolution/instances
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 20
+      volumes:
+        - name: evolution-instances
+          persistentVolumeClaim:
+            claimName: evolution-instances

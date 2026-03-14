@@ -1,0 +1,49 @@
+{
+  "name": "api_manager",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kua-Tech/api_manager.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Kua-Tech/api_manager/issues"
+  },
+  "homepage": "https://github.com/Kua-Tech/api_manager#readme",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.53.0",
+    "axios": "^1.11.0",
+    "cors": "^2.8.5",
+    "crc": "^4.3.2",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.4.0",
+    "multer": "^2.0.2",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.34.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.1.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/swagger-jsdoc": "^6.0.4",
+    "@types/swagger-ui-express": "^4.1.8",
+    "nodemon": "^3.1.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}

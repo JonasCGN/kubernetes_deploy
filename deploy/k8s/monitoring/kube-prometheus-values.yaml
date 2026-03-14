@@ -1,0 +1,43 @@
+grafana:
+  enabled: true
+  adminPassword: admin123
+  initChownData:
+    enabled: false
+  persistence:
+    enabled: true
+    size: 10Gi
+  service:
+    type: ClusterIP
+
+prometheus:
+  enabled: true
+  prometheusSpec:
+    retention: 15d
+    retentionSize: 20GB
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 30Gi
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+kube-state-metrics:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+kubelet:
+  enabled: true
