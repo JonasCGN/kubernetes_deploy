@@ -14,7 +14,7 @@ ingress:
     - host: __HEADLAMP_DOMAIN__
       paths:
         - path: /
-          pathType: Prefix
+          type: Prefix
   tls:
     - secretName: headlamp-tls
       hosts:
