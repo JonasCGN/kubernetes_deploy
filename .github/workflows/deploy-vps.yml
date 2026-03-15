@@ -234,7 +234,7 @@ jobs:
 
             PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/ingress.yaml)"
             case "$PLACEHOLDER_COUNT" in
-              0) ;;
+              0) : ;;
               *)
                 echo "Unresolved ingress placeholders detected"
                 exit 1
