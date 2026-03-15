@@ -25,11 +25,6 @@ on:
         required: false
         type: boolean
         default: false
-      require_cert_manager:
-        description: Fail deploy if cert-manager or ClusterIssuer is missing
-        required: false
-        type: boolean
-        default: false
   push:
     branches:
       - master
@@ -163,6 +158,7 @@ jobs:
         env:
           K8S_API_MANAGER_ENV: ${{ secrets.K8S_API_MANAGER_ENV }}
           K8S_EVOLUTION_ENV: ${{ secrets.K8S_EVOLUTION_ENV }}
+          LETSENCRYPT_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
           APP_DOMAIN: ${{ secrets.APP_DOMAIN }}
           API_DOMAIN: ${{ secrets.API_DOMAIN }}
           EVOLUTION_DOMAIN: ${{ secrets.EVOLUTION_DOMAIN }}
@@ -174,7 +170,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT || 22 }}
-          envs: K8S_API_MANAGER_ENV,K8S_EVOLUTION_ENV,APP_DOMAIN,API_DOMAIN,EVOLUTION_DOMAIN,GRAFANA_DOMAIN,PROMETHEUS_DOMAIN,CERT_MANAGER_CLUSTER_ISSUER
+          envs: K8S_API_MANAGER_ENV,K8S_EVOLUTION_ENV,LETSENCRYPT_EMAIL,APP_DOMAIN,API_DOMAIN,EVOLUTION_DOMAIN,GRAFANA_DOMAIN,PROMETHEUS_DOMAIN,CERT_MANAGER_CLUSTER_ISSUER
           command_timeout: 45m
           script: |
             cat >/tmp/remote-deploy.sh <<'EOF_REMOTE_DEPLOY'
@@ -190,16 +186,19 @@ jobs:
             : "${API_DEPLOY_IMAGE:?Missing API_DEPLOY_IMAGE}"
             : "${APP_DEPLOY_IMAGE:?Missing APP_DEPLOY_IMAGE}"
             : "${EVOLUTION_DEPLOY_IMAGE:?Missing EVOLUTION_DEPLOY_IMAGE}"
+            AUTO_INSTALL_CERT_MANAGER=true
 
             command -v git >/dev/null
             command -v kubectl >/dev/null
             command -v make >/dev/null
             command -v sed >/dev/null
+            command -v helm >/dev/null
 
             echo "[remote] Validating required secrets"
 
             : "${K8S_API_MANAGER_ENV:?Missing GitHub Secret: K8S_API_MANAGER_ENV}"
             : "${K8S_EVOLUTION_ENV:?Missing GitHub Secret: K8S_EVOLUTION_ENV}"
+            : "${LETSENCRYPT_EMAIL:?Missing GitHub Secret: LETSENCRYPT_EMAIL}"
 
             for required_domain in APP_DOMAIN API_DOMAIN EVOLUTION_DOMAIN GRAFANA_DOMAIN PROMETHEUS_DOMAIN; do
               : "${!required_domain:?Missing GitHub Secret: $required_domain}"
@@ -225,11 +224,32 @@ jobs:
 
             echo "[remote] Using kubectl context: $KCTX"
 
-            echo "[remote] Skipping cert-manager validation in deploy script"
+            CERT_MANAGER_CRD="$(kubectl --context "$KCTX" get crd clusterissuers.cert-manager.io --ignore-not-found -o name 2>/dev/null || true)"
+            case "$CERT_MANAGER_CRD" in
+              "")
+                echo "[remote] cert-manager not detected"
+                case "$AUTO_INSTALL_CERT_MANAGER" in
+                  true)
+                    echo "[remote] Installing cert-manager via Helm"
+                    kubectl --context "$KCTX" create namespace cert-manager --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
+                    helm repo add jetstack https://charts.jetstack.io --force-update
+                    helm repo update
+                    helm upgrade --install cert-manager jetstack/cert-manager \
+                      -n cert-manager \
+                      --set crds.enabled=true \
+                      --wait --timeout 15m
+                    ;;
+                  *)
+                    echo "[remote] Skipping cert-manager install"
+                    ;;
+                esac
+                ;;
+            esac
 
             echo "[remote] Rendering ingress domains and issuer"
             sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress.yaml
             sed -i "s|__APP_DOMAIN__|${APP_DOMAIN}|g; s|__API_DOMAIN__|${API_DOMAIN}|g; s|__EVOLUTION_DOMAIN__|${EVOLUTION_DOMAIN}|g; s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress.yaml
+            sed -i "s|__LETSENCRYPT_EMAIL__|${LETSENCRYPT_EMAIL}|g" deploy/k8s/manifests/clusterissuer.yaml
 
             PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/ingress.yaml)"
             case "$PLACEHOLDER_COUNT" in
@@ -240,10 +260,30 @@ jobs:
                 ;;
             esac
 
+            ISSUER_PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/clusterissuer.yaml)"
+            case "$ISSUER_PLACEHOLDER_COUNT" in
+              0) : ;;
+              *)
+                echo "Unresolved clusterissuer placeholders detected"
+                exit 1
+                ;;
+            esac
+
             echo "[remote] Applying namespace and secrets"
             kubectl --context "$KCTX" apply -f deploy/k8s/manifests/namespace.yaml
             printf '%s\n' "$K8S_API_MANAGER_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic api-manager-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
             printf '%s\n' "$K8S_EVOLUTION_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic evolution-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
+
+            CERT_MANAGER_CRD="$(kubectl --context "$KCTX" get crd clusterissuers.cert-manager.io --ignore-not-found -o name 2>/dev/null || true)"
+            case "$CERT_MANAGER_CRD" in
+              "")
+                echo "[remote] cert-manager not detected. Skipping ClusterIssuer apply."
+                ;;
+              *)
+                echo "[remote] Applying ClusterIssuer manifests"
+                kubectl --context "$KCTX" apply -f deploy/k8s/manifests/clusterissuer.yaml
+                ;;
+            esac
 
             echo "[remote] Applying workloads"
             make k8s-apply-vps \
@@ -272,7 +312,6 @@ jobs:
             BRANCH_NAME="${{ github.event.inputs.ref || github.ref_name }}" \
             KCTX_INPUT="${{ github.event.inputs.kube_context || '' }}" \
             DEPLOY_MONITORING="${{ github.event.inputs.deploy_monitoring || 'false' }}" \
-            REQUIRE_CERT_MANAGER="${{ github.event.inputs.require_cert_manager || 'false' }}" \
             GH_REPO_TOKEN_VALUE="${{ secrets.GH_REPO_TOKEN || '' }}" \
             GITHUB_REPOSITORY="${{ github.repository }}" \
             API_DEPLOY_IMAGE="${{ steps.deploy_tags.outputs.API_DEPLOY_IMAGE }}" \

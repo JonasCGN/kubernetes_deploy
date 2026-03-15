@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: braza-burger
 resources:
   - namespace.yaml
+  - clusterissuer.yaml
   - api-manager.yaml
   - api-manager-hpa.yaml
   - app-cliente.yaml
