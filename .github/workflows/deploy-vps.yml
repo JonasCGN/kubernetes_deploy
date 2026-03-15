@@ -175,7 +175,6 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT || 22 }}
           envs: K8S_API_MANAGER_ENV,K8S_EVOLUTION_ENV,APP_DOMAIN,API_DOMAIN,EVOLUTION_DOMAIN,GRAFANA_DOMAIN,PROMETHEUS_DOMAIN,CERT_MANAGER_CLUSTER_ISSUER
-          script_stop: true
           command_timeout: 45m
           script: |
             cat >/tmp/remote-deploy.sh <<'EOF_REMOTE_DEPLOY'
