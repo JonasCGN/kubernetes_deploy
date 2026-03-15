@@ -199,10 +199,8 @@ jobs:
               : "${!required_domain:?Missing GitHub Secret: $required_domain}"
             done
 
-            REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
-            if [ -n "${GH_REPO_TOKEN_VALUE:-}" ]; then
-              REPO_URL="https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${GITHUB_REPOSITORY}.git"
-            fi
+            REPO_URL="${GH_REPO_TOKEN_VALUE:+https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${GITHUB_REPOSITORY}.git}"
+            REPO_URL="${REPO_URL:-https://github.com/${GITHUB_REPOSITORY}.git}"
 
             echo "[remote] Cloning repository into $PROJECT_DIR"
             rm -rf "$PROJECT_DIR"
@@ -214,40 +212,48 @@ jobs:
             git reset --hard "origin/$BRANCH_NAME"
 
             KCTX="${KCTX_INPUT:-}"
-            if [ -z "$KCTX" ]; then
-              KCTX="$(kubectl config current-context 2>/dev/null || true)"
-            fi
+            case "$KCTX" in
+              "") KCTX="$(kubectl config current-context 2>/dev/null || true)" ;;
+            esac
             : "${KCTX:?Unable to resolve kubectl context. Set kube_context input or configure current-context on VPS}"
 
             echo "[remote] Using kubectl context: $KCTX"
 
             CRD_PRESENT="$(kubectl --context "$KCTX" get crd certificates.cert-manager.io --ignore-not-found -o name 2>/dev/null || true)"
-            if [ -n "$CRD_PRESENT" ]; then
-              CLUSTER_ISSUER_PRESENT="$(kubectl --context "$KCTX" get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" --ignore-not-found -o name 2>/dev/null || true)"
-              if [ -z "$CLUSTER_ISSUER_PRESENT" ]; then
-                echo "ClusterIssuer not found: $CERT_MANAGER_CLUSTER_ISSUER"
-                if [ "${REQUIRE_CERT_MANAGER:-false}" = "true" ]; then
-                  exit 1
-                fi
-                echo "Continuing deploy without strict cert-manager requirement"
-              fi
-            else
-              echo "cert-manager CRDs not found in cluster"
-              if [ "${REQUIRE_CERT_MANAGER:-false}" = "true" ]; then
-                exit 1
-              fi
-              echo "Continuing deploy without strict cert-manager requirement"
-            fi
+            case "$CRD_PRESENT" in
+              "")
+                echo "cert-manager CRDs not found in cluster"
+                case "${REQUIRE_CERT_MANAGER:-false}" in
+                  true) exit 1 ;;
+                  *) echo "Continuing deploy without strict cert-manager requirement" ;;
+                esac
+                ;;
+              *)
+                CLUSTER_ISSUER_PRESENT="$(kubectl --context "$KCTX" get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" --ignore-not-found -o name 2>/dev/null || true)"
+                case "$CLUSTER_ISSUER_PRESENT" in
+                  "")
+                    echo "ClusterIssuer not found: $CERT_MANAGER_CLUSTER_ISSUER"
+                    case "${REQUIRE_CERT_MANAGER:-false}" in
+                      true) exit 1 ;;
+                      *) echo "Continuing deploy without strict cert-manager requirement" ;;
+                    esac
+                    ;;
+                esac
+                ;;
+            esac
 
             echo "[remote] Rendering ingress domains and issuer"
             sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress.yaml
             sed -i "s|__APP_DOMAIN__|${APP_DOMAIN}|g; s|__API_DOMAIN__|${API_DOMAIN}|g; s|__EVOLUTION_DOMAIN__|${EVOLUTION_DOMAIN}|g; s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress.yaml
 
             PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/ingress.yaml)"
-            if [ "$PLACEHOLDER_COUNT" -gt 0 ]; then
-              echo "Unresolved ingress placeholders detected"
-              exit 1
-            fi
+            case "$PLACEHOLDER_COUNT" in
+              0) ;;
+              *)
+                echo "Unresolved ingress placeholders detected"
+                exit 1
+                ;;
+            esac
 
             echo "[remote] Applying namespace and secrets"
             kubectl --context "$KCTX" apply -f deploy/k8s/manifests/namespace.yaml
@@ -261,10 +267,12 @@ jobs:
               VPS_APP_IMAGE="$APP_DEPLOY_IMAGE" \
               VPS_EVOLUTION_IMAGE="$EVOLUTION_DEPLOY_IMAGE"
 
-            if [ "${DEPLOY_MONITORING:-false}" = "true" ]; then
-              echo "[remote] Deploying monitoring stack"
-              make k8s-monitor-vps KUBE_CONTEXT="$KCTX"
-            fi
+            case "${DEPLOY_MONITORING:-false}" in
+              true)
+                echo "[remote] Deploying monitoring stack"
+                make k8s-monitor-vps KUBE_CONTEXT="$KCTX"
+                ;;
+            esac
 
             echo "[remote] Collecting status"
             make k8s-status-vps KUBE_CONTEXT="$KCTX"
