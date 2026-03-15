@@ -232,30 +232,6 @@ jobs:
               done
             fi
 
-            REPO_URL="${GH_REPO_TOKEN_VALUE:+https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${GITHUB_REPOSITORY}.git}"
-            REPO_URL="${REPO_URL:-https://github.com/${GITHUB_REPOSITORY}.git}"
-
-            echo "[remote] Cloning repository into $PROJECT_DIR"
-            rm -rf "$PROJECT_DIR"
-            git clone "$REPO_URL" "$PROJECT_DIR"
-
-            cd "$PROJECT_DIR"
-            git fetch origin
-            git checkout "$BRANCH_NAME"
-            git reset --hard "origin/$BRANCH_NAME"
-
-            KCTX="${KCTX_INPUT:-}"
-            case "$KCTX" in
-              "") KCTX="$(kubectl config current-context 2>/dev/null || true)" ;;
-            esac
-            : "${KCTX:?Unable to resolve kubectl context. Set kube_context input or configure current-context on VPS}"
-
-            echo "[remote] Using kubectl context: $KCTX"
-
-            KUBECONFIG_PATH="/tmp/remote-kubeconfig"
-            kubectl config view --raw > "$KUBECONFIG_PATH"
-            export KUBECONFIG="$KUBECONFIG_PATH"
-
             retry_cmd() {
               local max_attempts="$1"
               shift
@@ -275,6 +251,52 @@ jobs:
                 delay=$((delay * 2))
               done
             }
+
+            retry_git_clone() {
+              local max_attempts="$1"
+              local attempt=1
+              local delay=8
+
+              until [ "$attempt" -gt "$max_attempts" ]; do
+                rm -rf "$PROJECT_DIR"
+                if git -c http.postBuffer=524288000 clone --depth 1 --branch "$BRANCH_NAME" "$REPO_URL" "$PROJECT_DIR"; then
+                  return 0
+                fi
+
+                if [ "$attempt" -ge "$max_attempts" ]; then
+                  echo "[remote] git clone failed after ${attempt} attempts"
+                  return 1
+                fi
+
+                echo "[remote] git clone attempt ${attempt}/${max_attempts} failed. Retrying in ${delay}s..."
+                sleep "$delay"
+                attempt=$((attempt + 1))
+                delay=$((delay * 2))
+              done
+            }
+
+            REPO_URL="${GH_REPO_TOKEN_VALUE:+https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${GITHUB_REPOSITORY}.git}"
+            REPO_URL="${REPO_URL:-https://github.com/${GITHUB_REPOSITORY}.git}"
+
+            echo "[remote] Cloning repository into $PROJECT_DIR"
+            retry_git_clone 3
+
+            cd "$PROJECT_DIR"
+            retry_cmd 3 git fetch --depth 1 origin
+            git checkout "$BRANCH_NAME"
+            git reset --hard "origin/$BRANCH_NAME"
+
+            KCTX="${KCTX_INPUT:-}"
+            case "$KCTX" in
+              "") KCTX="$(kubectl config current-context 2>/dev/null || true)" ;;
+            esac
+            : "${KCTX:?Unable to resolve kubectl context. Set kube_context input or configure current-context on VPS}"
+
+            echo "[remote] Using kubectl context: $KCTX"
+
+            KUBECONFIG_PATH="/tmp/remote-kubeconfig"
+            kubectl config view --raw > "$KUBECONFIG_PATH"
+            export KUBECONFIG="$KUBECONFIG_PATH"
 
             CERT_MANAGER_CRD="$(kubectl --context "$KCTX" get crd clusterissuers.cert-manager.io --ignore-not-found -o name 2>/dev/null || true)"
             CERT_MANAGER_DEPLOY="$(kubectl --context "$KCTX" -n cert-manager get deploy cert-manager --ignore-not-found -o name 2>/dev/null || true)"
