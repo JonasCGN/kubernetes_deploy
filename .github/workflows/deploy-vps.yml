@@ -148,6 +148,8 @@ jobs:
 
       - name: Build and push app_cliente image
         if: steps.deploy_tags.outputs.APP_SHOULD_BUILD == 'true'
+        env:
+          APP_API_URL: ${{ secrets.APP_API_URL }}
         uses: docker/build-push-action@v6
         with:
           context: ./app_cliente
@@ -161,6 +163,27 @@ jobs:
             ${{ steps.vars.outputs.APP_IMAGE }}
             ${{ steps.vars.outputs.APP_IMAGE_LATEST }}
 
+      - name: Validate built frontend API endpoint
+        if: steps.deploy_tags.outputs.APP_SHOULD_BUILD == 'true'
+        shell: bash
+        env:
+          APP_API_URL: ${{ secrets.APP_API_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_API_URL:-}" ]; then
+            echo "APP_API_URL is empty in GitHub Environment secrets"
+            exit 1
+          fi
+
+          case "$APP_API_URL" in
+            *localhost*|*127.0.0.1*|*":5000"*)
+              echo "APP_API_URL points to a local/dev endpoint: $APP_API_URL"
+              echo "Set APP_API_URL to the public API domain (https://apibraza.<ip>.nip.io)"
+              exit 1
+              ;;
+          esac
+
       - name: Deploy on VPS
         uses: appleboy/ssh-action@v1.0.3
         env:
@@ -172,13 +195,14 @@ jobs:
           EVOLUTION_DOMAIN: ${{ secrets.EVOLUTION_DOMAIN }}
           GRAFANA_DOMAIN: ${{ secrets.GRAFANA_DOMAIN }}
           PROMETHEUS_DOMAIN: ${{ secrets.PROMETHEUS_DOMAIN }}
+          HEADLAMP_DOMAIN: ${{ secrets.HEADLAMP_DOMAIN }}
           CERT_MANAGER_CLUSTER_ISSUER: ${{ secrets.CERT_MANAGER_CLUSTER_ISSUER || 'letsencrypt-prod' }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT || 22 }}
-          envs: K8S_API_MANAGER_ENV,K8S_EVOLUTION_ENV,LETSENCRYPT_EMAIL,APP_DOMAIN,API_DOMAIN,EVOLUTION_DOMAIN,GRAFANA_DOMAIN,PROMETHEUS_DOMAIN,CERT_MANAGER_CLUSTER_ISSUER
+          envs: K8S_API_MANAGER_ENV,K8S_EVOLUTION_ENV,LETSENCRYPT_EMAIL,APP_DOMAIN,API_DOMAIN,EVOLUTION_DOMAIN,GRAFANA_DOMAIN,PROMETHEUS_DOMAIN,HEADLAMP_DOMAIN,CERT_MANAGER_CLUSTER_ISSUER
           command_timeout: 45m
           script: |
             cat >/tmp/remote-deploy.sh <<'EOF_REMOTE_DEPLOY'
@@ -235,7 +259,7 @@ jobs:
             done
 
             if [ "${DEPLOY_MONITORING:-false}" = "true" ]; then
-              for required_domain in GRAFANA_DOMAIN PROMETHEUS_DOMAIN; do
+              for required_domain in GRAFANA_DOMAIN PROMETHEUS_DOMAIN HEADLAMP_DOMAIN; do
                 : "${!required_domain:?Missing GitHub Secret: $required_domain}"
               done
             fi
@@ -333,6 +357,7 @@ jobs:
             if [ "${DEPLOY_MONITORING:-false}" = "true" ]; then
               sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress-monitoring.yaml
               sed -i "s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress-monitoring.yaml
+              sed -i "s|__HEADLAMP_DOMAIN__|${HEADLAMP_DOMAIN}|g; s|__CERT_MANAGER_CLUSTER_ISSUER__|${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/monitoring/headlamp-values.yaml
             fi
 
             PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/ingress.yaml)"
@@ -350,6 +375,15 @@ jobs:
                 0) : ;;
                 *)
                   echo "Unresolved monitoring ingress placeholders detected"
+                  exit 1
+                  ;;
+              esac
+
+              HEADLAMP_PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/monitoring/headlamp-values.yaml)"
+              case "$HEADLAMP_PLACEHOLDER_COUNT" in
+                0) : ;;
+                *)
+                  echo "Unresolved headlamp placeholders detected"
                   exit 1
                   ;;
               esac
@@ -391,6 +425,16 @@ jobs:
               true)
                 echo "[remote] Deploying monitoring stack"
                 make k8s-monitor-vps KUBE_CONTEXT="$KCTX"
+
+                echo "[remote] Installing/Upgrading Headlamp"
+                helm repo add headlamp-k8s https://kubernetes-sigs.github.io/headlamp/ --force-update
+                helm repo update
+                helm upgrade --install headlamp headlamp-k8s/headlamp \
+                  --kube-context "$KCTX" \
+                  -n monitoring \
+                  -f deploy/k8s/monitoring/headlamp-values.yaml \
+                  --wait --timeout 15m
+
                 kubectl --context "$KCTX" apply -f deploy/k8s/manifests/ingress-monitoring.yaml
                 ;;
               *)

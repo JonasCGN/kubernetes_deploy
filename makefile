@@ -80,6 +80,7 @@ k8s-monitor-vps:
 	helm repo update
 	kubectl --context $(KUBE_CONTEXT) get ns monitoring >/dev/null 2>&1 || kubectl --context $(KUBE_CONTEXT) create namespace monitoring
 	helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack -n monitoring -f deploy/k8s/monitoring/kube-prometheus-values.yaml --wait --timeout 15m
+	kubectl --context $(KUBE_CONTEXT) apply -f deploy/k8s/monitoring/pod-consumption-heatmap-dashboard.yaml
 
 k8s-status-vps:
 	@if [ -z "$(KUBE_CONTEXT)" ]; then echo "Defina KUBE_CONTEXT"; exit 1; fi

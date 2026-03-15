@@ -1,0 +1,21 @@
+replicaCount: 1
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: __CERT_MANAGER_CLUSTER_ISSUER__
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  hosts:
+    - host: __HEADLAMP_DOMAIN__
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: headlamp-tls
+      hosts:
+        - __HEADLAMP_DOMAIN__

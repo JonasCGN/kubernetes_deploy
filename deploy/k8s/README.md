@@ -72,6 +72,7 @@ KEY_3=value_3
 Only when monitoring is enabled (`deploy_monitoring=true`):
 - GRAFANA_DOMAIN=<GRAFANA_PUBLIC_DOMAIN>
 - PROMETHEUS_DOMAIN=<PROMETHEUS_PUBLIC_DOMAIN>
+- HEADLAMP_DOMAIN=<HEADLAMP_PUBLIC_DOMAIN>
 
 Optional:
 - CERT_MANAGER_CLUSTER_ISSUER=<CLUSTER_ISSUER_NAME>
@@ -89,6 +90,16 @@ Optional:
 - Use workflow_dispatch with deploy_monitoring=false for daily deploys.
 - Enable monitoring install/upgrade only when needed.
 - Docker build cache is enabled in the workflow to speed up repeated deploys.
+
+## Monitoring Heatmap
+
+When `deploy_monitoring=true`, a Grafana dashboard named `Kubernetes Pod Consumption Heatmap`
+is applied automatically. It shows CPU and memory consumption per pod over time.
+
+## Headlamp (Kubernetes UI)
+
+When `deploy_monitoring=true`, Headlamp is installed via Helm in namespace `monitoring`
+and exposed by Traefik with TLS using `HEADLAMP_DOMAIN`.
 
 ## How the Workflow Deploys
 
