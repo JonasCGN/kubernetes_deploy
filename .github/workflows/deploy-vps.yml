@@ -173,8 +173,10 @@ jobs:
           script: |
             cat >/tmp/remote-deploy.sh <<'EOF_REMOTE_DEPLOY'
             #!/usr/bin/env bash
-            set -euo pipefail
-            trap 'echo "Remote deploy failed at line $LINENO"' ERR
+            set -xeuo pipefail
+            trap 'rc=$?; echo "Remote deploy failed at line $LINENO: $BASH_COMMAND (exit $rc)"; exit $rc' ERR
+
+            echo "[remote] Starting deploy script"
 
             : "${PROJECT_DIR:?Missing PROJECT_DIR}"
             : "${BRANCH_NAME:?Missing BRANCH_NAME}"
@@ -182,6 +184,13 @@ jobs:
             : "${API_DEPLOY_IMAGE:?Missing API_DEPLOY_IMAGE}"
             : "${APP_DEPLOY_IMAGE:?Missing APP_DEPLOY_IMAGE}"
             : "${EVOLUTION_DEPLOY_IMAGE:?Missing EVOLUTION_DEPLOY_IMAGE}"
+
+            command -v git >/dev/null
+            command -v kubectl >/dev/null
+            command -v make >/dev/null
+            command -v sed >/dev/null
+
+            echo "[remote] Validating required secrets"
 
             : "${K8S_API_MANAGER_ENV:?Missing GitHub Secret: K8S_API_MANAGER_ENV}"
             : "${K8S_EVOLUTION_ENV:?Missing GitHub Secret: K8S_EVOLUTION_ENV}"
@@ -195,6 +204,7 @@ jobs:
               REPO_URL="https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${GITHUB_REPOSITORY}.git"
             fi
 
+            echo "[remote] Cloning repository into $PROJECT_DIR"
             rm -rf "$PROJECT_DIR"
             git clone "$REPO_URL" "$PROJECT_DIR"
 
@@ -203,7 +213,13 @@ jobs:
             git checkout "$BRANCH_NAME"
             git reset --hard "origin/$BRANCH_NAME"
 
-            KCTX="${KCTX_INPUT:-$(kubectl config current-context)}"
+            KCTX="${KCTX_INPUT:-}"
+            if [ -z "$KCTX" ]; then
+              KCTX="$(kubectl config current-context 2>/dev/null || true)"
+            fi
+            : "${KCTX:?Unable to resolve kubectl context. Set kube_context input or configure current-context on VPS}"
+
+            echo "[remote] Using kubectl context: $KCTX"
 
             if kubectl --context "$KCTX" get crd certificates.cert-manager.io >/dev/null 2>&1; then
               if ! kubectl --context "$KCTX" get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" >/dev/null 2>&1; then
@@ -221,6 +237,7 @@ jobs:
               echo "Continuing deploy without strict cert-manager requirement"
             fi
 
+            echo "[remote] Rendering ingress domains and issuer"
             sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress.yaml
             sed -i "s|__APP_DOMAIN__|${APP_DOMAIN}|g; s|__API_DOMAIN__|${API_DOMAIN}|g; s|__EVOLUTION_DOMAIN__|${EVOLUTION_DOMAIN}|g; s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress.yaml
 
@@ -229,10 +246,12 @@ jobs:
               exit 1
             fi
 
+            echo "[remote] Applying namespace and secrets"
             kubectl --context "$KCTX" apply -f deploy/k8s/manifests/namespace.yaml
             printf '%s\n' "$K8S_API_MANAGER_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic api-manager-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
             printf '%s\n' "$K8S_EVOLUTION_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic evolution-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
 
+            echo "[remote] Applying workloads"
             make k8s-apply-vps \
               KUBE_CONTEXT="$KCTX" \
               VPS_API_IMAGE="$API_DEPLOY_IMAGE" \
@@ -240,12 +259,15 @@ jobs:
               VPS_EVOLUTION_IMAGE="$EVOLUTION_DEPLOY_IMAGE"
 
             if [ "${DEPLOY_MONITORING:-false}" = "true" ]; then
+              echo "[remote] Deploying monitoring stack"
               make k8s-monitor-vps KUBE_CONTEXT="$KCTX"
             fi
 
+            echo "[remote] Collecting status"
             make k8s-status-vps KUBE_CONTEXT="$KCTX"
             kubectl --context "$KCTX" get pods -A
             kubectl --context "$KCTX" -n braza-burger get ingress
+            echo "[remote] Deploy finished successfully"
             EOF_REMOTE_DEPLOY
 
             chmod 700 /tmp/remote-deploy.sh
