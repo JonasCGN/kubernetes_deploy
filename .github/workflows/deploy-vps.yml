@@ -91,9 +91,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          EVENT_NAME="${{ github.event_name }}"
           FORCE_REBUILD_INPUT="${{ github.event.inputs.force_rebuild || 'false' }}"
           API_CHANGED="${{ steps.changes.outputs.api }}"
           APP_CHANGED="${{ steps.changes.outputs.app }}"
+
+          # For manual runs, be deterministic: only rebuild when force_rebuild=true.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$FORCE_REBUILD_INPUT" != "true" ]; then
+            API_CHANGED="false"
+            APP_CHANGED="false"
+          fi
 
           if [ "$FORCE_REBUILD_INPUT" = "true" ]; then
             API_CHANGED="true"
@@ -351,7 +358,9 @@ jobs:
               sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress-monitoring.yaml
               sed -i "s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress-monitoring.yaml
               if [ -n "${HEADLAMP_DOMAIN:-}" ]; then
-                sed -i "s|__HEADLAMP_DOMAIN__|${HEADLAMP_DOMAIN}|g; s|__CERT_MANAGER_CLUSTER_ISSUER__|${CERT_MANAGER_CLUSTER_ISSUER}|g; s|__HEADLAMP_IN_CLUSTER_CONTEXT__|${KCTX}|g" deploy/k8s/monitoring/headlamp-values.yaml
+                # Substitui apenas os placeholders restantes do headlamp-values.yaml
+                # __HEADLAMP_IN_CLUSTER_CONTEXT__ foi removido — inClusterContextName agora é fixo no values
+                sed -i "s|__HEADLAMP_DOMAIN__|${HEADLAMP_DOMAIN}|g; s|__CERT_MANAGER_CLUSTER_ISSUER__|${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/monitoring/headlamp-values.yaml
               else
                 echo "[remote] HEADLAMP_DOMAIN not set; skipping Headlamp install"
               fi

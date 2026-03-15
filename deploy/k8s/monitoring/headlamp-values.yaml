@@ -2,7 +2,7 @@ replicaCount: 1
 
 config:
   inCluster: true
-  inClusterContextName: __HEADLAMP_IN_CLUSTER_CONTEXT__
+  inClusterContextName: vps
 
 service:
   type: ClusterIP
