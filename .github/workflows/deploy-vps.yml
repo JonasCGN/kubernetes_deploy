@@ -256,8 +256,29 @@ jobs:
             kubectl config view --raw > "$KUBECONFIG_PATH"
             export KUBECONFIG="$KUBECONFIG_PATH"
 
+            retry_cmd() {
+              local max_attempts="$1"
+              shift
+              local attempt=1
+              local delay=8
+
+              until "$@"; do
+                local rc=$?
+                if [ "$attempt" -ge "$max_attempts" ]; then
+                  echo "[remote] Command failed after ${attempt} attempts: $*"
+                  return "$rc"
+                fi
+
+                echo "[remote] Attempt ${attempt}/${max_attempts} failed (exit ${rc}). Retrying in ${delay}s..."
+                sleep "$delay"
+                attempt=$((attempt + 1))
+                delay=$((delay * 2))
+              done
+            }
+
             CERT_MANAGER_CRD="$(kubectl --context "$KCTX" get crd clusterissuers.cert-manager.io --ignore-not-found -o name 2>/dev/null || true)"
-            case "$CERT_MANAGER_CRD" in
+            CERT_MANAGER_DEPLOY="$(kubectl --context "$KCTX" -n cert-manager get deploy cert-manager --ignore-not-found -o name 2>/dev/null || true)"
+            case "${CERT_MANAGER_CRD}${CERT_MANAGER_DEPLOY}" in
               "")
                 echo "[remote] cert-manager not detected"
                 case "$AUTO_INSTALL_CERT_MANAGER" in
@@ -271,6 +292,16 @@ jobs:
                       -n cert-manager \
                       --set crds.enabled=true \
                       --wait --timeout 15m
+
+                    kubectl --context "$KCTX" wait --for=condition=Established crd/clusterissuers.cert-manager.io --timeout=180s || true
+
+                    CERT_MANAGER_CRD="$(kubectl --context "$KCTX" get crd clusterissuers.cert-manager.io --ignore-not-found -o name 2>/dev/null || true)"
+                    case "$CERT_MANAGER_CRD" in
+                      "")
+                        echo "[remote] cert-manager installed but CRD clusterissuers.cert-manager.io was not found"
+                        exit 1
+                        ;;
+                    esac
                     ;;
                   *)
                     echo "[remote] Skipping cert-manager install"
@@ -335,7 +366,7 @@ jobs:
             esac
 
             echo "[remote] Applying workloads"
-            make k8s-apply-vps \
+            retry_cmd 3 make k8s-apply-vps \
               KUBE_CONTEXT="$KCTX" \
               VPS_API_IMAGE="$API_DEPLOY_IMAGE" \
               VPS_APP_IMAGE="$APP_DEPLOY_IMAGE" \
