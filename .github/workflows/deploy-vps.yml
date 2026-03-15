@@ -7,6 +7,11 @@ on:
         description: GitHub Environment to use for secrets
         required: false
         default: KUBERNETES_DEPLOY
+      force_rebuild:
+        description: Force rebuilding images even if no relevant changes are detected
+        required: false
+        type: boolean
+        default: false
       ref:
         description: Git ref to deploy (branch/tag/sha)
         required: false
@@ -28,6 +33,9 @@ concurrency:
   group: deploy-vps-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: read
   packages: write
@@ -37,7 +45,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment_name || 'KUBERNETES_DEPLOY' }}
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       API_IMAGE_REPO: api-manager
       APP_IMAGE_REPO: app-cliente
       EVOLUTION_IMAGE: evoapicloud/evolution-api:latest
@@ -60,6 +67,47 @@ jobs:
           echo "API_IMAGE_LATEST=ghcr.io/${OWNER_LC}/${REPO_NAME}-${API_IMAGE_REPO}:latest" >> "$GITHUB_OUTPUT"
           echo "APP_IMAGE_LATEST=ghcr.io/${OWNER_LC}/${REPO_NAME}-${APP_IMAGE_REPO}:latest" >> "$GITHUB_OUTPUT"
 
+      - name: Detect relevant changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            api:
+              - 'api_manager/**'
+            app:
+              - 'app_cliente/**'
+
+      - name: Resolve deploy image tags
+        id: deploy_tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FORCE_REBUILD_INPUT="${{ github.event.inputs.force_rebuild || 'false' }}"
+          API_CHANGED="${{ steps.changes.outputs.api }}"
+          APP_CHANGED="${{ steps.changes.outputs.app }}"
+
+          if [ "$FORCE_REBUILD_INPUT" = "true" ]; then
+            API_CHANGED="true"
+            APP_CHANGED="true"
+          fi
+
+          if [ "$API_CHANGED" = "true" ]; then
+            echo "API_SHOULD_BUILD=true" >> "$GITHUB_OUTPUT"
+            echo "API_DEPLOY_IMAGE=${{ steps.vars.outputs.API_IMAGE }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "API_SHOULD_BUILD=false" >> "$GITHUB_OUTPUT"
+            echo "API_DEPLOY_IMAGE=${{ steps.vars.outputs.API_IMAGE_LATEST }}" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$APP_CHANGED" = "true" ]; then
+            echo "APP_SHOULD_BUILD=true" >> "$GITHUB_OUTPUT"
+            echo "APP_DEPLOY_IMAGE=${{ steps.vars.outputs.APP_IMAGE }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "APP_SHOULD_BUILD=false" >> "$GITHUB_OUTPUT"
+            echo "APP_DEPLOY_IMAGE=${{ steps.vars.outputs.APP_IMAGE_LATEST }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -71,6 +119,7 @@ jobs:
           password: ${{ github.token }}
 
       - name: Build and push api_manager image
+        if: steps.deploy_tags.outputs.API_SHOULD_BUILD == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./api_manager
@@ -83,6 +132,7 @@ jobs:
             ${{ steps.vars.outputs.API_IMAGE_LATEST }}
 
       - name: Build and push app_cliente image
+        if: steps.deploy_tags.outputs.APP_SHOULD_BUILD == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./app_cliente
@@ -116,7 +166,8 @@ jobs:
           script_stop: true
           command_timeout: 45m
           script: |
-            set -euo pipefail
+            set -euxo pipefail
+            trap 'echo "Remote deploy failed at line $LINENO"' ERR
 
             PROJECT_DIR="${{ secrets.VPS_PROJECT_DIR || '$HOME/braza_burger' }}"
             BRANCH_NAME="${{ github.event.inputs.ref || github.ref_name }}"
@@ -182,19 +233,19 @@ jobs:
             printf '%s\n' "$K8S_API_MANAGER_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic api-manager-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
             printf '%s\n' "$K8S_EVOLUTION_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic evolution-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
 
-            if [ "${{ github.event.inputs.deploy_monitoring || 'true' }}" = "true" ]; then
+            if [ "${{ github.event.inputs.deploy_monitoring || 'false' }}" = "true" ]; then
               make k8s-apply-vps \
                 KUBE_CONTEXT="$KCTX" \
-                VPS_API_IMAGE="${{ steps.vars.outputs.API_IMAGE }}" \
-                VPS_APP_IMAGE="${{ steps.vars.outputs.APP_IMAGE }}" \
+                VPS_API_IMAGE="${{ steps.deploy_tags.outputs.API_DEPLOY_IMAGE }}" \
+                VPS_APP_IMAGE="${{ steps.deploy_tags.outputs.APP_DEPLOY_IMAGE }}" \
                 VPS_EVOLUTION_IMAGE="${{ env.EVOLUTION_IMAGE }}"
               make k8s-monitor-vps KUBE_CONTEXT="$KCTX"
               make k8s-status-vps KUBE_CONTEXT="$KCTX"
             else
               make k8s-apply-vps \
                 KUBE_CONTEXT="$KCTX" \
-                VPS_API_IMAGE="${{ steps.vars.outputs.API_IMAGE }}" \
-                VPS_APP_IMAGE="${{ steps.vars.outputs.APP_IMAGE }}" \
+                VPS_API_IMAGE="${{ steps.deploy_tags.outputs.API_DEPLOY_IMAGE }}" \
+                VPS_APP_IMAGE="${{ steps.deploy_tags.outputs.APP_DEPLOY_IMAGE }}" \
                 VPS_EVOLUTION_IMAGE="${{ env.EVOLUTION_IMAGE }}"
               make k8s-status-vps KUBE_CONTEXT="$KCTX"
             fi
