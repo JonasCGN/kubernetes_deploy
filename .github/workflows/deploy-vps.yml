@@ -357,7 +357,11 @@ jobs:
             if [ "${DEPLOY_MONITORING:-false}" = "true" ]; then
               sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress-monitoring.yaml
               sed -i "s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress-monitoring.yaml
-              sed -i "s|__HEADLAMP_DOMAIN__|${HEADLAMP_DOMAIN}|g; s|__CERT_MANAGER_CLUSTER_ISSUER__|${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/monitoring/headlamp-values.yaml
+              if [ -n "${HEADLAMP_DOMAIN:-}" ]; then
+                sed -i "s|__HEADLAMP_DOMAIN__|${HEADLAMP_DOMAIN}|g; s|__CERT_MANAGER_CLUSTER_ISSUER__|${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/monitoring/headlamp-values.yaml
+              else
+                echo "[remote] HEADLAMP_DOMAIN not set; skipping Headlamp install"
+              fi
             fi
 
             PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/ingress.yaml)"
@@ -379,14 +383,16 @@ jobs:
                   ;;
               esac
 
-              HEADLAMP_PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/monitoring/headlamp-values.yaml)"
-              case "$HEADLAMP_PLACEHOLDER_COUNT" in
-                0) : ;;
-                *)
-                  echo "Unresolved headlamp placeholders detected"
-                  exit 1
-                  ;;
-              esac
+              if [ -n "${HEADLAMP_DOMAIN:-}" ]; then
+                HEADLAMP_PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/monitoring/headlamp-values.yaml)"
+                case "$HEADLAMP_PLACEHOLDER_COUNT" in
+                  0) : ;;
+                  *)
+                    echo "Unresolved headlamp placeholders detected"
+                    exit 1
+                    ;;
+                esac
+              fi
             fi
 
             ISSUER_PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/clusterissuer.yaml)"
@@ -426,14 +432,18 @@ jobs:
                 echo "[remote] Deploying monitoring stack"
                 make k8s-monitor-vps KUBE_CONTEXT="$KCTX"
 
-                echo "[remote] Installing/Upgrading Headlamp"
-                helm repo add headlamp-k8s https://kubernetes-sigs.github.io/headlamp/ --force-update
-                helm repo update
-                helm upgrade --install headlamp headlamp-k8s/headlamp \
-                  --kube-context "$KCTX" \
-                  -n monitoring \
-                  -f deploy/k8s/monitoring/headlamp-values.yaml \
-                  --wait --timeout 15m
+                if [ -n "${HEADLAMP_DOMAIN:-}" ]; then
+                  echo "[remote] Installing/Upgrading Headlamp"
+                  helm repo add headlamp-k8s https://kubernetes-sigs.github.io/headlamp/ --force-update
+                  helm repo update
+                  helm upgrade --install headlamp headlamp-k8s/headlamp \
+                    --kube-context "$KCTX" \
+                    -n monitoring \
+                    -f deploy/k8s/monitoring/headlamp-values.yaml \
+                    --wait --timeout 15m
+                else
+                  echo "[remote] HEADLAMP_DOMAIN not set; skipping Headlamp install"
+                fi
 
                 kubectl --context "$KCTX" apply -f deploy/k8s/manifests/ingress-monitoring.yaml
                 ;;
