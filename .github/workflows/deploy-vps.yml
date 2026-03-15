@@ -37,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment_name || 'KUBERNETES_DEPLOY' }}
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       API_IMAGE_REPO: api-manager
       APP_IMAGE_REPO: app-cliente
       EVOLUTION_IMAGE: evoapicloud/evolution-api:latest
