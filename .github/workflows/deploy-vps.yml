@@ -449,14 +449,28 @@ jobs:
                     exit 1
                   fi
 
-                  if ! kubectl --context "$KCTX" -n monitoring wait \
-                    --for=condition=Available \
-                    deploy \
-                    -l app.kubernetes.io/instance=headlamp \
-                    --timeout=180s; then
+                  echo "[remote] Waiting for Headlamp deployment object to appear"
+                  HEADLAMP_DEPLOY_READY=false
+                  for _ in $(seq 1 24); do
+                    if kubectl --context "$KCTX" -n monitoring get deploy headlamp >/dev/null 2>&1; then
+                      HEADLAMP_DEPLOY_READY=true
+                      break
+                    fi
+                    sleep 5
+                  done
+
+                  if [ "$HEADLAMP_DEPLOY_READY" != "true" ]; then
+                    echo "[remote] Headlamp deployment resource was not created in time. Collecting diagnostics..."
+                    kubectl --context "$KCTX" -n monitoring get all -l app.kubernetes.io/instance=headlamp || true
+                    kubectl --context "$KCTX" -n monitoring get ingress || true
+                    kubectl --context "$KCTX" -n monitoring get events --sort-by=.metadata.creationTimestamp | tail -n 120 || true
+                    exit 1
+                  fi
+
+                  if ! kubectl --context "$KCTX" -n monitoring rollout status deploy/headlamp --timeout=180s; then
                     echo "[remote] Headlamp deployment did not become Available in 180s. Collecting diagnostics..."
                     kubectl --context "$KCTX" -n monitoring get pods -l app.kubernetes.io/instance=headlamp -o wide || true
-                    kubectl --context "$KCTX" -n monitoring describe deploy -l app.kubernetes.io/instance=headlamp || true
+                    kubectl --context "$KCTX" -n monitoring describe deploy/headlamp || true
                     kubectl --context "$KCTX" -n monitoring describe pods -l app.kubernetes.io/instance=headlamp || true
                     kubectl --context "$KCTX" -n monitoring get ingress || true
                     kubectl --context "$KCTX" -n monitoring get events --sort-by=.metadata.creationTimestamp | tail -n 120 || true
