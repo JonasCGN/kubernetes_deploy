@@ -30,7 +30,7 @@ spec:
       containers:
         - name: app-cliente
           image: ghcr.io/change-me-owner/change-me-repo-app-cliente:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           readinessProbe:

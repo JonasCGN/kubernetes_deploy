@@ -35,7 +35,7 @@ spec:
       containers:
         - name: api-manager
           image: ghcr.io/change-me-owner/change-me-repo-api-manager:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 5000
           env:

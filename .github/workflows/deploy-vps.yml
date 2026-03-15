@@ -67,10 +67,11 @@ jobs:
         run: |
           set -euo pipefail
           SHORT_SHA="${GITHUB_SHA::7}"
+          BUILD_TAG="${SHORT_SHA}-${GITHUB_RUN_NUMBER}"
           OWNER_LC="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          echo "API_IMAGE=ghcr.io/${OWNER_LC}/${REPO_NAME}-${API_IMAGE_REPO}:${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "APP_IMAGE=ghcr.io/${OWNER_LC}/${REPO_NAME}-${APP_IMAGE_REPO}:${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "API_IMAGE=ghcr.io/${OWNER_LC}/${REPO_NAME}-${API_IMAGE_REPO}:${BUILD_TAG}" >> "$GITHUB_OUTPUT"
+          echo "APP_IMAGE=ghcr.io/${OWNER_LC}/${REPO_NAME}-${APP_IMAGE_REPO}:${BUILD_TAG}" >> "$GITHUB_OUTPUT"
           echo "API_IMAGE_LATEST=ghcr.io/${OWNER_LC}/${REPO_NAME}-${API_IMAGE_REPO}:latest" >> "$GITHUB_OUTPUT"
           echo "APP_IMAGE_LATEST=ghcr.io/${OWNER_LC}/${REPO_NAME}-${APP_IMAGE_REPO}:latest" >> "$GITHUB_OUTPUT"
 
@@ -91,8 +92,15 @@ jobs:
           set -euo pipefail
 
           FORCE_REBUILD_INPUT="${{ github.event.inputs.force_rebuild || 'false' }}"
+          EVENT_NAME="${{ github.event_name }}"
           API_CHANGED="${{ steps.changes.outputs.api }}"
           APP_CHANGED="${{ steps.changes.outputs.app }}"
+
+          # APP_API_URL is compiled into the Flutter bundle.
+          # Always rebuild app-cliente on manual runs to pick up secret changes.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            APP_CHANGED="true"
+          fi
 
           if [ "$FORCE_REBUILD_INPUT" = "true" ]; then
             API_CHANGED="true"
