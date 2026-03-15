@@ -192,7 +192,29 @@ jobs:
             command -v kubectl >/dev/null
             command -v make >/dev/null
             command -v sed >/dev/null
-            command -v helm >/dev/null
+
+            HELM_PRESENT=true
+            command -v helm >/dev/null 2>&1 || HELM_PRESENT=false
+            case "$HELM_PRESENT" in
+              true)
+                echo "[remote] Helm already installed"
+                ;;
+              *)
+                echo "[remote] Helm not found, installing automatically"
+                CURL_PRESENT=true
+                command -v curl >/dev/null 2>&1 || CURL_PRESENT=false
+                case "$CURL_PRESENT" in
+                  true) ;;
+                  *)
+                    apt-get update
+                    apt-get install -y curl
+                    ;;
+                esac
+
+                curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+                command -v helm >/dev/null 2>&1 || { echo "[remote] Helm installation failed"; exit 1; }
+                ;;
+            esac
 
             echo "[remote] Validating required secrets"
 
