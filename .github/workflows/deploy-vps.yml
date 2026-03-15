@@ -221,8 +221,10 @@ jobs:
 
             echo "[remote] Using kubectl context: $KCTX"
 
-            if kubectl --context "$KCTX" get crd certificates.cert-manager.io >/dev/null 2>&1; then
-              if ! kubectl --context "$KCTX" get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" >/dev/null 2>&1; then
+            CRD_PRESENT="$(kubectl --context "$KCTX" get crd certificates.cert-manager.io --ignore-not-found -o name 2>/dev/null || true)"
+            if [ -n "$CRD_PRESENT" ]; then
+              CLUSTER_ISSUER_PRESENT="$(kubectl --context "$KCTX" get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" --ignore-not-found -o name 2>/dev/null || true)"
+              if [ -z "$CLUSTER_ISSUER_PRESENT" ]; then
                 echo "ClusterIssuer not found: $CERT_MANAGER_CLUSTER_ISSUER"
                 if [ "${REQUIRE_CERT_MANAGER:-false}" = "true" ]; then
                   exit 1
@@ -241,7 +243,8 @@ jobs:
             sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress.yaml
             sed -i "s|__APP_DOMAIN__|${APP_DOMAIN}|g; s|__API_DOMAIN__|${API_DOMAIN}|g; s|__EVOLUTION_DOMAIN__|${EVOLUTION_DOMAIN}|g; s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress.yaml
 
-            if grep -q '__[A-Z_][A-Z_]*__' deploy/k8s/manifests/ingress.yaml; then
+            PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/ingress.yaml)"
+            if [ "$PLACEHOLDER_COUNT" -gt 0 ]; then
               echo "Unresolved ingress placeholders detected"
               exit 1
             fi
