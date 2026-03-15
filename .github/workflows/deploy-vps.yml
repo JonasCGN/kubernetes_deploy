@@ -25,6 +25,11 @@ on:
         required: false
         type: boolean
         default: false
+      require_cert_manager:
+        description: Fail deploy if cert-manager or ClusterIssuer is missing
+        required: false
+        type: boolean
+        default: false
   push:
     branches:
       - master
@@ -173,6 +178,7 @@ jobs:
             BRANCH_NAME="${{ github.event.inputs.ref || github.ref_name }}"
             KCTX_INPUT="${{ github.event.inputs.kube_context || '' }}"
             DEPLOY_MONITORING="${{ github.event.inputs.deploy_monitoring || 'false' }}"
+            REQUIRE_CERT_MANAGER="${{ github.event.inputs.require_cert_manager || 'false' }}"
             GH_REPO_TOKEN_VALUE="${{ secrets.GH_REPO_TOKEN || '' }}"
             REPO_URL="https://github.com/${{ github.repository }}.git"
             REPO_URL="${GH_REPO_TOKEN_VALUE:+https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${{ github.repository }}.git}"
@@ -196,15 +202,21 @@ jobs:
 
             KCTX="${KCTX_INPUT:-$(kubectl config current-context)}"
 
-            kubectl --context "$KCTX" get crd certificates.cert-manager.io >/dev/null 2>&1 || {
+            if kubectl --context "$KCTX" get crd certificates.cert-manager.io >/dev/null 2>&1; then
+              kubectl --context "$KCTX" get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" >/dev/null 2>&1 || {
+                echo "ClusterIssuer not found: $CERT_MANAGER_CLUSTER_ISSUER"
+                if [ "$REQUIRE_CERT_MANAGER" = "true" ]; then
+                  exit 1
+                fi
+                echo "Continuing deploy without strict cert-manager requirement"
+              }
+            else
               echo "cert-manager CRDs not found in cluster"
-              exit 1
-            }
-
-            kubectl --context "$KCTX" get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" >/dev/null 2>&1 || {
-              echo "ClusterIssuer not found: $CERT_MANAGER_CLUSTER_ISSUER"
-              exit 1
-            }
+              if [ "$REQUIRE_CERT_MANAGER" = "true" ]; then
+                exit 1
+              fi
+              echo "Continuing deploy without strict cert-manager requirement"
+            fi
 
             sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress.yaml
             sed -i "s|__APP_DOMAIN__|${APP_DOMAIN}|g; s|__API_DOMAIN__|${API_DOMAIN}|g; s|__EVOLUTION_DOMAIN__|${EVOLUTION_DOMAIN}|g; s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress.yaml
