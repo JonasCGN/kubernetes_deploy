@@ -58,11 +58,25 @@ k8s-apply-vps:
 	kubectl --context $(KUBE_CONTEXT) -n braza-burger set image deployment/api-manager api-manager=$(VPS_API_IMAGE)
 	kubectl --context $(KUBE_CONTEXT) -n braza-burger set image deployment/app-cliente app-cliente=$(VPS_APP_IMAGE)
 	kubectl --context $(KUBE_CONTEXT) -n braza-burger set image deployment/evolution-api evolution-api=$(VPS_EVOLUTION_IMAGE)
-	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/evolution-postgres --timeout=600s
-	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/evolution-redis --timeout=600s
-	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/evolution-api --timeout=600s
-	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/api-manager --timeout=600s
-	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/app-cliente --timeout=600s
+	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/evolution-postgres --timeout=300s
+	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/evolution-redis --timeout=300s
+	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/evolution-api --timeout=300s
+	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/api-manager --timeout=300s || { \
+		echo "[k8s-apply-vps] api-manager rollout failed. Collecting diagnostics..."; \
+		kubectl --context $(KUBE_CONTEXT) -n braza-burger get pods -l app=api-manager -o wide || true; \
+		kubectl --context $(KUBE_CONTEXT) -n braza-burger describe deploy/api-manager || true; \
+		kubectl --context $(KUBE_CONTEXT) -n braza-burger describe pods -l app=api-manager || true; \
+		kubectl --context $(KUBE_CONTEXT) -n braza-burger get events --sort-by=.metadata.creationTimestamp | tail -n 120 || true; \
+		exit 1; \
+	}
+	kubectl --context $(KUBE_CONTEXT) -n braza-burger rollout status deploy/app-cliente --timeout=300s || { \
+		echo "[k8s-apply-vps] app-cliente rollout failed. Collecting diagnostics..."; \
+		kubectl --context $(KUBE_CONTEXT) -n braza-burger get pods -l app=app-cliente -o wide || true; \
+		kubectl --context $(KUBE_CONTEXT) -n braza-burger describe deploy/app-cliente || true; \
+		kubectl --context $(KUBE_CONTEXT) -n braza-burger describe pods -l app=app-cliente || true; \
+		kubectl --context $(KUBE_CONTEXT) -n braza-burger get events --sort-by=.metadata.creationTimestamp | tail -n 120 || true; \
+		exit 1; \
+	}
 
 k8s-secrets-vps:
 	@if [ -z "$(KUBE_CONTEXT)" ]; then echo "Defina KUBE_CONTEXT"; exit 1; fi

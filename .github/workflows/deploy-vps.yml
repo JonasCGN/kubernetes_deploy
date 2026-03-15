@@ -436,11 +436,18 @@ jobs:
                   echo "[remote] Installing/Upgrading Headlamp"
                   helm repo add headlamp-k8s https://kubernetes-sigs.github.io/headlamp/ --force-update
                   helm repo update
-                  helm upgrade --install headlamp headlamp-k8s/headlamp \
+                  if ! helm upgrade --install headlamp headlamp-k8s/headlamp \
                     --kube-context "$KCTX" \
                     -n monitoring \
                     -f deploy/k8s/monitoring/headlamp-values.yaml \
-                    --wait --timeout 15m
+                    --wait --timeout 8m; then
+                    echo "[remote] Headlamp Helm install did not complete in time. Collecting diagnostics..."
+                    kubectl --context "$KCTX" -n monitoring get pods -l app.kubernetes.io/instance=headlamp -o wide || true
+                    kubectl --context "$KCTX" -n monitoring describe pods -l app.kubernetes.io/instance=headlamp || true
+                    kubectl --context "$KCTX" -n monitoring get ingress || true
+                    kubectl --context "$KCTX" -n monitoring get events --sort-by=.metadata.creationTimestamp | tail -n 120 || true
+                    exit 1
+                  fi
                 else
                   echo "[remote] HEADLAMP_DOMAIN not set; skipping Headlamp install"
                 fi
