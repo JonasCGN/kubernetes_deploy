@@ -118,7 +118,7 @@ jobs:
           script: |
             set -euo pipefail
 
-            PROJECT_DIR="${{ secrets.VPS_PROJECT_DIR || '~/braza_burger' }}"
+            PROJECT_DIR="${{ secrets.VPS_PROJECT_DIR || '$HOME/braza_burger' }}"
             BRANCH_NAME="${{ github.event.inputs.ref || github.ref_name }}"
             KCTX_INPUT="${{ github.event.inputs.kube_context || '' }}"
 
@@ -147,7 +147,8 @@ jobs:
             fi
 
             for required_domain in APP_DOMAIN API_DOMAIN EVOLUTION_DOMAIN GRAFANA_DOMAIN PROMETHEUS_DOMAIN; do
-              if [ -z "${!required_domain:-}" ]; then
+              eval "required_value=\${$required_domain:-}"
+              if [ -z "$required_value" ]; then
                 echo "Missing GitHub Secret: ${required_domain}"
                 exit 1
               fi
