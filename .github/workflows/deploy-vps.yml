@@ -252,37 +252,15 @@ jobs:
               done
             }
 
-            retry_git_clone() {
-              local max_attempts="$1"
-              local attempt=1
-              local delay=8
-
-              until [ "$attempt" -gt "$max_attempts" ]; do
-                rm -rf "$PROJECT_DIR"
-                if git -c http.postBuffer=524288000 clone --depth 1 --branch "$BRANCH_NAME" "$REPO_URL" "$PROJECT_DIR"; then
-                  return 0
-                fi
-
-                if [ "$attempt" -ge "$max_attempts" ]; then
-                  echo "[remote] git clone failed after ${attempt} attempts"
-                  return 1
-                fi
-
-                echo "[remote] git clone attempt ${attempt}/${max_attempts} failed. Retrying in ${delay}s..."
-                sleep "$delay"
-                attempt=$((attempt + 1))
-                delay=$((delay * 2))
-              done
-            }
-
             REPO_URL="${GH_REPO_TOKEN_VALUE:+https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${GITHUB_REPOSITORY}.git}"
             REPO_URL="${REPO_URL:-https://github.com/${GITHUB_REPOSITORY}.git}"
 
             echo "[remote] Cloning repository into $PROJECT_DIR"
-            retry_git_clone 3
+            rm -rf "$PROJECT_DIR"
+            git clone "$REPO_URL" "$PROJECT_DIR"
 
             cd "$PROJECT_DIR"
-            retry_cmd 3 git fetch --depth 1 origin
+            git fetch origin
             git checkout "$BRANCH_NAME"
             git reset --hard "origin/$BRANCH_NAME"
 
