@@ -68,6 +68,8 @@ KEY_3=value_3
 - APP_DOMAIN=<APP_PUBLIC_DOMAIN>
 - API_DOMAIN=<API_PUBLIC_DOMAIN>
 - EVOLUTION_DOMAIN=<EVOLUTION_PUBLIC_DOMAIN>
+
+Only when monitoring is enabled (`deploy_monitoring=true`):
 - GRAFANA_DOMAIN=<GRAFANA_PUBLIC_DOMAIN>
 - PROMETHEUS_DOMAIN=<PROMETHEUS_PUBLIC_DOMAIN>
 
@@ -102,15 +104,15 @@ Optional:
 
 - Kubernetes cluster reachable from VPS context.
 - kubectl and helm installed on VPS.
-- Ingress NGINX installed.
+- Traefik ingress controller installed.
 - cert-manager installed.
 - ClusterIssuer created (example: letsencrypt-prod).
 - Default StorageClass available for PVCs.
 
 Notes:
 - You must use one ingress controller consistently (NGINX or Traefik).
-- Current manifests are configured with ingressClassName=nginx.
-- If your cluster uses Traefik, update ingress class and cert-manager solver accordingly.
+- Current manifests are configured with ingressClassName=traefik.
+- Monitoring ingress is applied only when `deploy_monitoring=true`.
 - For quick public tests, nip.io domains are supported (for example: app.<PUBLIC_IP>.nip.io).
 
 ## Run Deployment
@@ -129,7 +131,7 @@ Manual:
 
 Environment behavior:
 - On workflow_dispatch, the selected environment is used.
-- On push to master, the workflow uses the `production` environment by default.
+- On push to master, the workflow uses the `KUBERNETES_DEPLOY` environment by default.
 
 ## Verification Commands
 

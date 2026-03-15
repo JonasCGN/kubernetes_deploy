@@ -2,7 +2,7 @@ import axios from 'axios';
 import { ConfigApp } from '../config/config_app';
 
 export class ApiEvolution {
-  static urlEvolution = "https://evolution.kuatech.com.br";
+  static urlEvolution = ConfigApp.urlEvolutionApi || 'http://evolution-api:8080';
   static nomeInstancia = ConfigApp.nameInstance || '';
   static apiKey = ConfigApp.apiKey || '';
 

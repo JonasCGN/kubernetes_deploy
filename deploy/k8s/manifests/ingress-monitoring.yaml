@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: braza-burger-ingress
+  name: braza-burger-monitoring-ingress
   namespace: braza-burger
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
@@ -11,42 +11,29 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - __APP_DOMAIN__
-      secretName: app-tls
+        - __GRAFANA_DOMAIN__
+      secretName: grafana-tls
     - hosts:
-        - __API_DOMAIN__
-      secretName: api-tls
-    - hosts:
-        - __EVOLUTION_DOMAIN__
-      secretName: evolution-tls
+        - __PROMETHEUS_DOMAIN__
+      secretName: prometheus-tls
   rules:
-    - host: __APP_DOMAIN__
+    - host: __GRAFANA_DOMAIN__
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: app-cliente
+                name: grafana-bridge
                 port:
                   number: 80
-    - host: __API_DOMAIN__
+    - host: __PROMETHEUS_DOMAIN__
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: api-manager
+                name: prometheus-bridge
                 port:
-                  number: 5000
-    - host: __EVOLUTION_DOMAIN__
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: evolution-api
-                port:
-                  number: 8080
+                  number: 9090

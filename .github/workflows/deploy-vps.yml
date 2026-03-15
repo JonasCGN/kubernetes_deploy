@@ -222,9 +222,15 @@ jobs:
             : "${K8S_EVOLUTION_ENV:?Missing GitHub Secret: K8S_EVOLUTION_ENV}"
             : "${LETSENCRYPT_EMAIL:?Missing GitHub Secret: LETSENCRYPT_EMAIL}"
 
-            for required_domain in APP_DOMAIN API_DOMAIN EVOLUTION_DOMAIN GRAFANA_DOMAIN PROMETHEUS_DOMAIN; do
+            for required_domain in APP_DOMAIN API_DOMAIN EVOLUTION_DOMAIN; do
               : "${!required_domain:?Missing GitHub Secret: $required_domain}"
             done
+
+            if [ "${DEPLOY_MONITORING:-false}" = "true" ]; then
+              for required_domain in GRAFANA_DOMAIN PROMETHEUS_DOMAIN; do
+                : "${!required_domain:?Missing GitHub Secret: $required_domain}"
+              done
+            fi
 
             REPO_URL="${GH_REPO_TOKEN_VALUE:+https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${GITHUB_REPOSITORY}.git}"
             REPO_URL="${REPO_URL:-https://github.com/${GITHUB_REPOSITORY}.git}"
@@ -275,8 +281,13 @@ jobs:
 
             echo "[remote] Rendering ingress domains and issuer"
             sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress.yaml
-            sed -i "s|__APP_DOMAIN__|${APP_DOMAIN}|g; s|__API_DOMAIN__|${API_DOMAIN}|g; s|__EVOLUTION_DOMAIN__|${EVOLUTION_DOMAIN}|g; s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress.yaml
+            sed -i "s|__APP_DOMAIN__|${APP_DOMAIN}|g; s|__API_DOMAIN__|${API_DOMAIN}|g; s|__EVOLUTION_DOMAIN__|${EVOLUTION_DOMAIN}|g" deploy/k8s/manifests/ingress.yaml
             sed -i "s|__LETSENCRYPT_EMAIL__|${LETSENCRYPT_EMAIL}|g" deploy/k8s/manifests/clusterissuer.yaml
+
+            if [ "${DEPLOY_MONITORING:-false}" = "true" ]; then
+              sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress-monitoring.yaml
+              sed -i "s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress-monitoring.yaml
+            fi
 
             PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/ingress.yaml)"
             case "$PLACEHOLDER_COUNT" in
@@ -286,6 +297,17 @@ jobs:
                 exit 1
                 ;;
             esac
+
+            if [ "${DEPLOY_MONITORING:-false}" = "true" ]; then
+              MONITORING_PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/ingress-monitoring.yaml)"
+              case "$MONITORING_PLACEHOLDER_COUNT" in
+                0) : ;;
+                *)
+                  echo "Unresolved monitoring ingress placeholders detected"
+                  exit 1
+                  ;;
+              esac
+            fi
 
             ISSUER_PLACEHOLDER_COUNT="$(awk '/__[A-Z_][A-Z_]*__/ {c++} END {print c+0}' deploy/k8s/manifests/clusterissuer.yaml)"
             case "$ISSUER_PLACEHOLDER_COUNT" in
@@ -323,6 +345,10 @@ jobs:
               true)
                 echo "[remote] Deploying monitoring stack"
                 make k8s-monitor-vps KUBE_CONTEXT="$KCTX"
+                kubectl --context "$KCTX" apply -f deploy/k8s/manifests/ingress-monitoring.yaml
+                ;;
+              *)
+                kubectl --context "$KCTX" -n braza-burger delete ingress braza-burger-monitoring-ingress --ignore-not-found
                 ;;
             esac
 

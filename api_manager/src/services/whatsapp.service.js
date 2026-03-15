@@ -40,6 +40,6 @@ class ApiEvolution {
     }
 }
 exports.ApiEvolution = ApiEvolution;
-ApiEvolution.urlEvolution = "https://evolution.kuatech.com.br";
+ApiEvolution.urlEvolution = config_app_1.ConfigApp.urlEvolutionApi || 'http://evolution-api:8080';
 ApiEvolution.nomeInstancia = config_app_1.ConfigApp.nameInstance || '';
 ApiEvolution.apiKey = config_app_1.ConfigApp.apiKey || '';
