@@ -254,10 +254,17 @@ jobs:
 
             REPO_URL="${GH_REPO_TOKEN_VALUE:+https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${GITHUB_REPOSITORY}.git}"
             REPO_URL="${REPO_URL:-https://github.com/${GITHUB_REPOSITORY}.git}"
+            export GIT_TERMINAL_PROMPT=0
 
             echo "[remote] Cloning repository into $PROJECT_DIR"
             rm -rf "$PROJECT_DIR"
-            git clone "$REPO_URL" "$PROJECT_DIR"
+            if command -v timeout >/dev/null 2>&1; then
+              timeout 30 git ls-remote --heads "$REPO_URL" "$BRANCH_NAME" >/dev/null
+              timeout 180 git clone --branch "$BRANCH_NAME" "$REPO_URL" "$PROJECT_DIR"
+            else
+              git ls-remote --heads "$REPO_URL" "$BRANCH_NAME" >/dev/null
+              git clone --branch "$BRANCH_NAME" "$REPO_URL" "$PROJECT_DIR"
+            fi
 
             cd "$PROJECT_DIR"
             git fetch origin
