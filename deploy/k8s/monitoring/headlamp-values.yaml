@@ -4,11 +4,6 @@ config:
   inCluster: true
   inClusterContextName: vps
 
-extraArgs:
-  - "-in-cluster"
-  - "-in-cluster-context-name=vps"
-  - "-plugins-dir=/headlamp/plugins"
-
 service:
   type: ClusterIP
 

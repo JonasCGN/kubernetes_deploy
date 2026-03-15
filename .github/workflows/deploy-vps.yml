@@ -439,6 +439,7 @@ jobs:
                   helm repo add headlamp-k8s https://kubernetes-sigs.github.io/headlamp/ --force-update
                   helm repo update headlamp-k8s
                   if ! helm upgrade --install headlamp headlamp-k8s/headlamp \
+                    --version 0.40.0 \
                     --kube-context "$KCTX" \
                     -n monitoring \
                     -f deploy/k8s/monitoring/headlamp-values.yaml \
