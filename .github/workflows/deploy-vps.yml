@@ -3,10 +3,14 @@ name: Deploy VPS Kubernetes
 on:
   workflow_dispatch:
     inputs:
+      environment_name:
+        description: GitHub Environment to use for secrets
+        required: false
+        default: KUBERNETES_DEPLOY
       ref:
         description: Git ref to deploy (branch/tag/sha)
         required: false
-        default: main
+        default: master
       kube_context:
         description: Optional kube context on VPS (empty = current-context)
         required: false
@@ -15,10 +19,10 @@ on:
         description: Install/upgrade monitoring stack
         required: false
         type: boolean
-        default: true
+        default: false
   push:
     branches:
-      - main
+      - master
 
 concurrency:
   group: deploy-vps-${{ github.ref }}
@@ -26,12 +30,13 @@ concurrency:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment_name || 'KUBERNETES_DEPLOY' }}
     env:
-      IMAGE_NAMESPACE: ${{ secrets.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}
       API_IMAGE_REPO: api-manager
       APP_IMAGE_REPO: app-cliente
       EVOLUTION_IMAGE: evoapicloud/evolution-api:latest
@@ -47,19 +52,22 @@ jobs:
         run: |
           set -euo pipefail
           SHORT_SHA="${GITHUB_SHA::7}"
-          echo "API_IMAGE=docker.io/${IMAGE_NAMESPACE}/${API_IMAGE_REPO}:${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "APP_IMAGE=docker.io/${IMAGE_NAMESPACE}/${APP_IMAGE_REPO}:${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "API_IMAGE_LATEST=docker.io/${IMAGE_NAMESPACE}/${API_IMAGE_REPO}:latest" >> "$GITHUB_OUTPUT"
-          echo "APP_IMAGE_LATEST=docker.io/${IMAGE_NAMESPACE}/${APP_IMAGE_REPO}:latest" >> "$GITHUB_OUTPUT"
+          OWNER_LC="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          echo "API_IMAGE=ghcr.io/${OWNER_LC}/${REPO_NAME}-${API_IMAGE_REPO}:${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "APP_IMAGE=ghcr.io/${OWNER_LC}/${REPO_NAME}-${APP_IMAGE_REPO}:${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "API_IMAGE_LATEST=ghcr.io/${OWNER_LC}/${REPO_NAME}-${API_IMAGE_REPO}:latest" >> "$GITHUB_OUTPUT"
+          echo "APP_IMAGE_LATEST=ghcr.io/${OWNER_LC}/${REPO_NAME}-${APP_IMAGE_REPO}:latest" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Build and push api_manager image
         uses: docker/build-push-action@v6
@@ -67,6 +75,8 @@ jobs:
           context: ./api_manager
           file: ./api_manager/Dockerfile.prod
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ${{ steps.vars.outputs.API_IMAGE }}
             ${{ steps.vars.outputs.API_IMAGE_LATEST }}
@@ -77,6 +87,8 @@ jobs:
           context: ./app_cliente
           file: ./app_cliente/Dockerfile.prod
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
             API_URL=${{ secrets.APP_API_URL }}
           tags: |
@@ -85,18 +97,28 @@ jobs:
 
       - name: Deploy on VPS
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          K8S_API_MANAGER_ENV: ${{ secrets.K8S_API_MANAGER_ENV }}
+          K8S_EVOLUTION_ENV: ${{ secrets.K8S_EVOLUTION_ENV }}
+          APP_DOMAIN: ${{ secrets.APP_DOMAIN }}
+          API_DOMAIN: ${{ secrets.API_DOMAIN }}
+          EVOLUTION_DOMAIN: ${{ secrets.EVOLUTION_DOMAIN }}
+          GRAFANA_DOMAIN: ${{ secrets.GRAFANA_DOMAIN }}
+          PROMETHEUS_DOMAIN: ${{ secrets.PROMETHEUS_DOMAIN }}
+          CERT_MANAGER_CLUSTER_ISSUER: ${{ secrets.CERT_MANAGER_CLUSTER_ISSUER || 'letsencrypt-prod' }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          envs: K8S_API_MANAGER_ENV,K8S_EVOLUTION_ENV,APP_DOMAIN,API_DOMAIN,EVOLUTION_DOMAIN,GRAFANA_DOMAIN,PROMETHEUS_DOMAIN,CERT_MANAGER_CLUSTER_ISSUER
           script_stop: true
           command_timeout: 45m
           script: |
             set -euo pipefail
 
             PROJECT_DIR="${{ secrets.VPS_PROJECT_DIR || '~/braza_burger' }}"
-            BRANCH_NAME="${{ github.ref_name }}"
+            BRANCH_NAME="${{ github.event.inputs.ref || github.ref_name }}"
             KCTX_INPUT="${{ github.event.inputs.kube_context || '' }}"
 
             if [ ! -d "$PROJECT_DIR/.git" ]; then
@@ -113,24 +135,66 @@ jobs:
             git checkout "$BRANCH_NAME"
             git reset --hard "origin/$BRANCH_NAME"
 
+            if [ -z "${K8S_API_MANAGER_ENV:-}" ]; then
+              echo "Missing GitHub Secret: K8S_API_MANAGER_ENV"
+              exit 1
+            fi
+
+            if [ -z "${K8S_EVOLUTION_ENV:-}" ]; then
+              echo "Missing GitHub Secret: K8S_EVOLUTION_ENV"
+              exit 1
+            fi
+
+            for required_domain in APP_DOMAIN API_DOMAIN EVOLUTION_DOMAIN GRAFANA_DOMAIN PROMETHEUS_DOMAIN; do
+              if [ -z "${!required_domain:-}" ]; then
+                echo "Missing GitHub Secret: ${required_domain}"
+                exit 1
+              fi
+            done
+
             if [ -n "$KCTX_INPUT" ]; then
               KCTX="$KCTX_INPUT"
             else
               KCTX="$(kubectl config current-context)"
             fi
 
+            kubectl --context "$KCTX" get crd certificates.cert-manager.io >/dev/null 2>&1 || {
+              echo "cert-manager CRDs not found in cluster"
+              exit 1
+            }
+
+            kubectl --context "$KCTX" get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" >/dev/null 2>&1 || {
+              echo "ClusterIssuer not found: $CERT_MANAGER_CLUSTER_ISSUER"
+              exit 1
+            }
+
+            sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress.yaml
+            sed -i "s|__APP_DOMAIN__|${APP_DOMAIN}|g; s|__API_DOMAIN__|${API_DOMAIN}|g; s|__EVOLUTION_DOMAIN__|${EVOLUTION_DOMAIN}|g; s|__GRAFANA_DOMAIN__|${GRAFANA_DOMAIN}|g; s|__PROMETHEUS_DOMAIN__|${PROMETHEUS_DOMAIN}|g" deploy/k8s/manifests/ingress.yaml
+
+            if grep -q '__[A-Z_][A-Z_]*__' deploy/k8s/manifests/ingress.yaml; then
+              echo "Unresolved ingress placeholders detected"
+              exit 1
+            fi
+
+            kubectl --context "$KCTX" apply -f deploy/k8s/manifests/namespace.yaml
+            printf '%s\n' "$K8S_API_MANAGER_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic api-manager-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
+            printf '%s\n' "$K8S_EVOLUTION_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic evolution-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
+
             if [ "${{ github.event.inputs.deploy_monitoring || 'true' }}" = "true" ]; then
-              make k8s-deploy-vps-full \
+              make k8s-apply-vps \
                 KUBE_CONTEXT="$KCTX" \
                 VPS_API_IMAGE="${{ steps.vars.outputs.API_IMAGE }}" \
                 VPS_APP_IMAGE="${{ steps.vars.outputs.APP_IMAGE }}" \
                 VPS_EVOLUTION_IMAGE="${{ env.EVOLUTION_IMAGE }}"
+              make k8s-monitor-vps KUBE_CONTEXT="$KCTX"
+              make k8s-status-vps KUBE_CONTEXT="$KCTX"
             else
-              make k8s-deploy-vps \
+              make k8s-apply-vps \
                 KUBE_CONTEXT="$KCTX" \
                 VPS_API_IMAGE="${{ steps.vars.outputs.API_IMAGE }}" \
                 VPS_APP_IMAGE="${{ steps.vars.outputs.APP_IMAGE }}" \
                 VPS_EVOLUTION_IMAGE="${{ env.EVOLUTION_IMAGE }}"
+              make k8s-status-vps KUBE_CONTEXT="$KCTX"
             fi
 
             kubectl --context "$KCTX" get pods -A

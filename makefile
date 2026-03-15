@@ -4,23 +4,10 @@
 	k8s-deploy-vps k8s-deploy-vps-full k8s-apply-vps k8s-secrets-vps k8s-monitor-vps k8s-status-vps \
 	ssh-rsync ssh-scp ssh-shell k8s-deploy-ssh k8s-deploy-ssh-scp k8s-status-ssh
 
-KUBE_CONTEXT ?=
-LOCAL_API_IMAGE ?= braza/api-manager:local
-LOCAL_APP_IMAGE ?= braza/app-cliente:local
-LOCAL_API_URL ?= http://api.seudominio.com
-VPS_API_IMAGE ?= docker.io/seu-usuario/api-manager:latest
-VPS_APP_IMAGE ?= docker.io/seu-usuario/app-cliente:latest
-VPS_EVOLUTION_IMAGE ?= evoapicloud/evolution-api:latest
-
-SERVER ?= root@62.171.180.87
-PROJECT_PATH ?= $(notdir $(CURDIR))
-REMOTE_DIR ?= ~/$(PROJECT_PATH)
-USER_DOCKER ?= jonascgn
-SSH ?= ssh
-SCP ?= scp
-RSYNC ?= rsync
-KUBE_CONTEXT_REMOTE ?= $$(kubectl config current-context)
-RSYNC_EXCLUDES ?= --exclude=.git --exclude=node_modules --exclude=app_cliente/build --exclude=evolution-api/node_modules
+ifneq (,$(wildcard .env.makefile))
+include .env.makefile
+export
+endif
 
 help:
 	@echo "=== Deploy Braza Burger ==="

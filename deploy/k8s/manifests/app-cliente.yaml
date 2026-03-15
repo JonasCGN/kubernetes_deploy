@@ -29,7 +29,7 @@ spec:
     spec:
       containers:
         - name: app-cliente
-          image: docker.io/seu-usuario/app-cliente:latest
+          image: ghcr.io/change-me-owner/change-me-repo-app-cliente:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

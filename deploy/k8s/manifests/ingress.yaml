@@ -5,10 +5,28 @@ metadata:
   namespace: braza-burger
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - __APP_DOMAIN__
+      secretName: app-tls
+    - hosts:
+        - __API_DOMAIN__
+      secretName: api-tls
+    - hosts:
+        - __EVOLUTION_DOMAIN__
+      secretName: evolution-tls
+    - hosts:
+        - __GRAFANA_DOMAIN__
+      secretName: grafana-tls
+    - hosts:
+        - __PROMETHEUS_DOMAIN__
+      secretName: prometheus-tls
   rules:
-    - host: app.seudominio.com
+    - host: __APP_DOMAIN__
       http:
         paths:
           - path: /
@@ -18,7 +36,7 @@ spec:
                 name: app-cliente
                 port:
                   number: 80
-    - host: api.seudominio.com
+    - host: __API_DOMAIN__
       http:
         paths:
           - path: /
@@ -28,7 +46,7 @@ spec:
                 name: api-manager
                 port:
                   number: 5000
-    - host: evolution.seudominio.com
+    - host: __EVOLUTION_DOMAIN__
       http:
         paths:
           - path: /
@@ -38,7 +56,7 @@ spec:
                 name: evolution-api
                 port:
                   number: 8080
-    - host: grafana.seudominio.com
+    - host: __GRAFANA_DOMAIN__
       http:
         paths:
           - path: /
@@ -48,7 +66,7 @@ spec:
                 name: grafana-bridge
                 port:
                   number: 80
-    - host: prometheus.seudominio.com
+    - host: __PROMETHEUS_DOMAIN__
       http:
         paths:
           - path: /

@@ -34,7 +34,7 @@ spec:
     spec:
       containers:
         - name: api-manager
-          image: docker.io/seu-usuario/api-manager:latest
+          image: ghcr.io/change-me-owner/change-me-repo-api-manager:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000

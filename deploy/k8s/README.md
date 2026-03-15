@@ -1,353 +1,166 @@
-# Deploy na VPS com Kubernetes (Braza Burger)
+# Kubernetes Deploy Guide (Public Template)
 
-Este diretório contém um baseline para subir:
-- app_cliente (Flutter Web + Nginx)
-- api_manager (Node/Express)
-- evolution-api + Postgres + Redis
+This document is intentionally generic for team/public usage.
+Do not place real credentials, real hosts, or personal infrastructure details here.
 
-## Comandos rápidos (local e VPS)
+## Scope
 
-Use o makefile da raiz do projeto:
+Deploys the following services to Kubernetes:
+- app-cliente
+- api-manager
+- evolution-api
+- monitoring stack (optional)
 
-Local:
+Main workflow:
+- [deploy-vps.yml](../../../.github/workflows/deploy-vps.yml)
 
-```bash
-make k8s-build-local-images
-make k8s-deploy-local
-make k8s-monitor-local
-make k8s-status-local
+## Required GitHub Secrets
+
+Configure all values in GitHub: Settings -> Secrets and variables -> Actions.
+Recommended: store deploy secrets in a GitHub Environment (example: production).
+
+Private filling template:
+- [README.oculto.template.md](README.oculto.template.md)
+
+### Container registry (GHCR)
+
+No Docker Hub secrets are required for image push.
+The workflow publishes images to GHCR using the workflow token (`github.token`).
+
+Generated image names:
+- ghcr.io/<repo_owner>/<repo_name>-api-manager:<tag>
+- ghcr.io/<repo_owner>/<repo_name>-app-cliente:<tag>
+
+Important:
+- The workflow needs `packages: write` permission (already configured).
+- If the package is private, configure image pull auth in the cluster (`imagePullSecret`) or make package visibility public.
+
+### Build/runtime endpoints
+
+- APP_API_URL=https://<API_PUBLIC_DOMAIN>
+
+### VPS connection
+
+- VPS_HOST=<VPS_HOST_OR_IP>
+- VPS_USER=<VPS_SSH_USER>
+- VPS_SSH_KEY=<VPS_PRIVATE_KEY_PEM>
+
+Optional:
+- VPS_SSH_PORT=<VPS_SSH_PORT>
+- VPS_PROJECT_DIR=<VPS_PROJECT_DIR>
+- GH_REPO_TOKEN=<GITHUB_TOKEN_FOR_PRIVATE_REPO>
+
+### Kubernetes environment secrets (multiline)
+
+- K8S_API_MANAGER_ENV=<API_MANAGER_ENV_CONTENT>
+- K8S_EVOLUTION_ENV=<EVOLUTION_ENV_CONTENT>
+
+Expected format for both multiline secrets:
+
+```env
+KEY_1=value_1
+KEY_2=value_2
+KEY_3=value_3
 ```
 
-VPS (com contexto kubeconfig):
+### Domain and TLS variables
 
-```bash
-make k8s-deploy-vps KUBE_CONTEXT=seu-contexto
-make k8s-monitor-vps KUBE_CONTEXT=seu-contexto
-make k8s-status-vps KUBE_CONTEXT=seu-contexto
-```
+- APP_DOMAIN=<APP_PUBLIC_DOMAIN>
+- API_DOMAIN=<API_PUBLIC_DOMAIN>
+- EVOLUTION_DOMAIN=<EVOLUTION_PUBLIC_DOMAIN>
+- GRAFANA_DOMAIN=<GRAFANA_PUBLIC_DOMAIN>
+- PROMETHEUS_DOMAIN=<PROMETHEUS_PUBLIC_DOMAIN>
 
-## Deploy pela GitHub Action (recomendado para VPS)
+Optional:
+- CERT_MANAGER_CLUSTER_ISSUER=<CLUSTER_ISSUER_NAME>
 
-Workflow criado em:
-- `.github/workflows/deploy-vps.yml`
+## Security and Privacy Rules
 
-Esse workflow faz:
-1. build e push das imagens `api-manager` e `app-cliente` para Docker Hub
-2. conecta na VPS por SSH
-3. atualiza o repositório na VPS
-4. roda `make k8s-deploy-vps-full` no servidor
+- Never commit .env files.
+- Never hardcode hostnames, private keys, tokens, or passwords.
+- Keep all sensitive values in GitHub Secrets.
+- Rotate any secret immediately if exposed.
+- Use short-lived tokens whenever possible.
 
-### Secrets obrigatórios no GitHub
+## Fast Deploy Strategy
 
-No repositório do GitHub, configure em Settings > Secrets and variables > Actions:
+- Use workflow_dispatch with deploy_monitoring=false for daily deploys.
+- Enable monitoring install/upgrade only when needed.
+- Docker build cache is enabled in the workflow to speed up repeated deploys.
 
-- `DOCKERHUB_USERNAME`: seu usuário do Docker Hub
-- `DOCKERHUB_TOKEN`: token do Docker Hub (não use senha)
-- `DOCKERHUB_NAMESPACE`: namespace das imagens (normalmente igual ao username)
-- `APP_API_URL`: URL pública da API usada no build do Flutter (ex: `https://api.seudominio.com`)
-- `VPS_HOST`: IP ou domínio da VPS
-- `VPS_USER`: usuário SSH da VPS (ex: `root`)
-- `VPS_SSH_KEY`: chave privada SSH (conteúdo completo)
+## How the Workflow Deploys
 
-### Secrets opcionais
+1. Builds and pushes api-manager and app-cliente images.
+2. Connects to VPS via SSH.
+3. Pulls latest code from the selected ref.
+4. Validates cert-manager and ClusterIssuer.
+5. Renders ingress domains from GitHub Secrets.
+6. Creates/updates Kubernetes secrets from GitHub Secrets.
+7. Applies manifests and waits for rollout.
 
-- `VPS_SSH_PORT`: porta SSH (default 22)
-- `VPS_PROJECT_DIR`: pasta do projeto na VPS (default `~/braza_burger`)
-- `GH_REPO_TOKEN`: necessário apenas se o repositório for privado e a VPS não tiver acesso por HTTPS sem token
+## Cluster Prerequisites
 
-### Como rodar
+- Kubernetes cluster reachable from VPS context.
+- kubectl and helm installed on VPS.
+- Ingress NGINX installed.
+- cert-manager installed.
+- ClusterIssuer created (example: letsencrypt-prod).
+- Default StorageClass available for PVCs.
 
-Opção 1: push na `main` dispara automaticamente.
+Notes:
+- You must use one ingress controller consistently (NGINX or Traefik).
+- Current manifests are configured with ingressClassName=nginx.
+- If your cluster uses Traefik, update ingress class and cert-manager solver accordingly.
+- For quick public tests, nip.io domains are supported (for example: app.<PUBLIC_IP>.nip.io).
 
-Opção 2: manual em Actions > Deploy VPS Kubernetes > Run workflow:
-- `ref`: branch/tag/sha
-- `kube_context`: opcional (vazio usa `kubectl config current-context` na VPS)
-- `deploy_monitoring`: `true` ou `false`
+## Run Deployment
 
-### Como saber seu usuário
+Automatic:
+- Push to master branch.
 
-- `VPS_USER`: é o mesmo usuário que você usa no SSH (`ssh root@...` => user é `root`)
-- `DOCKERHUB_USERNAME`: é seu login no Docker Hub
+Manual:
+- Open GitHub Actions.
+- Run Deploy VPS Kubernetes workflow.
+- Inputs:
+  - environment_name=<GITHUB_ENVIRONMENT_NAME>
+  - ref=<BRANCH_OR_TAG_OR_SHA>
+  - kube_context=<OPTIONAL_KUBECTL_CONTEXT>
+  - deploy_monitoring=<true_or_false>
 
-VPS via SSH + rsync (estilo automatizado):
+Environment behavior:
+- On workflow_dispatch, the selected environment is used.
+- On push to master, the workflow uses the `production` environment by default.
 
-```bash
-make k8s-deploy-ssh \
-  SERVER=root@62.171.180.87 \
-  VPS_API_IMAGE=docker.io/SEU_USUARIO/api-manager:latest \
-  VPS_APP_IMAGE=docker.io/SEU_USUARIO/app-cliente:latest \
-  VPS_EVOLUTION_IMAGE=evoapicloud/evolution-api:latest
-```
-
-Esse alvo:
-- sincroniza o projeto para a VPS com rsync
-- entra por ssh
-- executa `make k8s-deploy-vps-full` no servidor remoto
-- usa automaticamente o contexto atual do kubectl da VPS
-
-Significado de "usuario" (tem 2 tipos):
-- SSH user: usuario da sua VPS, ex: `root` em `root@62.171.180.87`.
-- Registry user: usuario do Docker Hub/GHCR para puxar imagens, ex: `docker.io/SEU_USUARIO/api-manager:latest`.
-
-Se nao for usar imagens publicas no registry:
-- deixe as imagens privadas e configure `imagePullSecret` no cluster, ou
-- publique as imagens como publicas para simplificar o primeiro deploy.
-
-Se estiver no Windows sem rsync, use fallback via scp:
-
-```bash
-make k8s-deploy-ssh-scp \
-  SERVER=root@62.171.180.87 \
-  VPS_API_IMAGE=docker.io/SEU_USUARIO/api-manager:latest \
-  VPS_APP_IMAGE=docker.io/SEU_USUARIO/app-cliente:latest \
-  VPS_EVOLUTION_IMAGE=evoapicloud/evolution-api:latest
-```
-
-Se `ssh`/`scp` nao estiverem no PATH do Windows:
-
-```bash
-make k8s-deploy-ssh-scp \
-  SERVER=root@62.171.180.87 \
-  SSH='C:/WINDOWS/System32/OpenSSH/ssh.exe' \
-  SCP='C:/WINDOWS/System32/OpenSSH/scp.exe' \
-  VPS_API_IMAGE=docker.io/SEU_USUARIO/api-manager:latest \
-  VPS_APP_IMAGE=docker.io/SEU_USUARIO/app-cliente:latest \
-  VPS_EVOLUTION_IMAGE=evoapicloud/evolution-api:latest
-```
-
-Deploy completo (app + api + evolution + monitoramento):
-
-```bash
-make k8s-deploy-vps-full \
-  KUBE_CONTEXT=seu-contexto \
-  VPS_API_IMAGE=docker.io/SEU_USUARIO/api-manager:latest \
-  VPS_APP_IMAGE=docker.io/SEU_USUARIO/app-cliente:latest \
-  VPS_EVOLUTION_IMAGE=evoapicloud/evolution-api:latest
-```
-
-## 1) Pré-requisitos na VPS
-
-- Kubernetes instalado (recomendado: k3s)
-- kubectl configurado para o cluster
-- Ingress NGINX instalado
-- Um registry para imagens (Docker Hub, GHCR, etc.)
-
-Instalação rápida de k3s na VPS:
-
-```bash
-curl -sfL https://get.k3s.io | sh -
-sudo kubectl get nodes
-```
-
-## 2) Build e push das imagens
-
-Troque `SEU_USUARIO` pelo seu usuário do registry.
-
-### api_manager
-
-```bash
-cd api_manager
-docker build -f Dockerfile.prod -t docker.io/SEU_USUARIO/api-manager:latest .
-docker push docker.io/SEU_USUARIO/api-manager:latest
-```
-
-### app_cliente
-
-Use a URL pública da API no build do Flutter:
-
-```bash
-cd app_cliente
-docker build -f Dockerfile.prod \
-  --build-arg API_URL=https://api.seudominio.com \
-  -t docker.io/SEU_USUARIO/app-cliente:latest .
-docker push docker.io/SEU_USUARIO/app-cliente:latest
-```
-
-## 3) Criar secrets no cluster
-
-### Namespace
-
-```bash
-kubectl apply -f deploy/k8s/manifests/namespace.yaml
-```
-
-### Secret do api_manager
-
-Use seu .env real:
-
-```bash
-kubectl -n braza-burger create secret generic api-manager-env \
-  --from-env-file=api_manager/.env \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-
-### Secret do Evolution (demais variáveis)
-
-```bash
-kubectl -n braza-burger create secret generic evolution-env \
-  --from-env-file=evolution-api/.env \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-
-Importante: ajuste no seu `evolution-api/.env` pelo menos:
-- `SERVER_URL=https://evolution.seudominio.com`
-- `DATABASE_PROVIDER=postgresql`
-- `POSTGRES_PASSWORD`
-- `DATABASE_CONNECTION_URI`
-- `CORS_ORIGIN=https://app.seudominio.com,https://api.seudominio.com`
-
-Fallback padrao de primeiro deploy (para nao quebrar se faltar chave no .env):
-- usuario do Postgres: `evolution`
-- senha do Postgres: `evolution123`
-- URI padrao: `postgresql://evolution:evolution123@evolution-postgres:5432/evolution_db?schema=evolution_api`
-
-Depois do primeiro teste funcionando, troque a senha e URI para valores reais.
-
-## 4) Ajustar domínios do Ingress
-
-Edite o arquivo:
-- `deploy/k8s/manifests/ingress.yaml`
-
-Substituições necessárias:
-- `app.seudominio.com`, `api.seudominio.com`, `evolution.seudominio.com`, `grafana.seudominio.com`, `prometheus.seudominio.com` pelos domínios reais
-
-As imagens de app/api/evolution no VPS são aplicadas via variáveis no comando `make k8s-deploy-vps-full`.
-
-## 5) Aplicar tudo
-
-```bash
-kubectl apply -k deploy/k8s/manifests
-```
-
-## 6) Verificar rollout
+## Verification Commands
 
 ```bash
 kubectl -n braza-burger get pods
 kubectl -n braza-burger get svc
 kubectl -n braza-burger get ingress
+kubectl -n braza-burger get hpa
 kubectl -n braza-burger rollout status deploy/api-manager
 kubectl -n braza-burger rollout status deploy/app-cliente
 kubectl -n braza-burger rollout status deploy/evolution-api
-kubectl -n braza-burger get hpa
 ```
 
-## Rotas da API (importante)
-
-O Service do Kubernetes NAO limita rotas.
-
-Em `api-manager.yaml`, o Service expoe a porta `5000` do pod.
-Qualquer rota implementada no Express continua funcionando normalmente, por exemplo:
-- `/produtos/com-insumos`
-- `/pedido`
-- `/users`
-- `/configuracoes`
-- `/api-docs`
-
-Ou seja, o balanceamento acontece por conexao/pacote entre pods, nao por rota.
-
-## Load balancing e autoscaling
-
-- `api-manager` foi configurado com `replicas: 2` (load balancing imediato).
-- HPA foi adicionado em `api-manager-hpa.yaml` com `minReplicas: 2` e `maxReplicas: 10`.
-- Escala por CPU e memoria (resource metrics).
-
-Para o HPA funcionar, o cluster precisa do metrics-server:
-
-```bash
-kubectl get deployment metrics-server -n kube-system
-kubectl top nodes
-kubectl top pods -n braza-burger
-```
-
-Se `kubectl top` falhar, instale o metrics-server antes.
-
-## 7) Debug rápido
-
-```bash
-kubectl -n braza-burger logs deploy/api-manager --tail=100
-kubectl -n braza-burger logs deploy/evolution-api --tail=100
-kubectl -n braza-burger describe pod -l app=api-manager
-```
-
-## Monitoracao completa (metrics-server + Prometheus + Grafana)
-
-Arquivos criados:
-- `deploy/k8s/monitoring/kube-prometheus-values.yaml`
-- `deploy/k8s/scripts/install-monitoring.sh`
-- `deploy/k8s/scripts/install-monitoring.ps1`
-
-Executar no host que tem acesso ao cluster:
-
-Linux:
-
-```bash
-chmod +x deploy/k8s/scripts/install-monitoring.sh
-./deploy/k8s/scripts/install-monitoring.sh
-```
-
-Windows PowerShell:
-
-```powershell
-./deploy/k8s/scripts/install-monitoring.ps1
-```
-
-Se falhar, rode este bloco de diagnostico e compartilhe a saida:
+## Troubleshooting
 
 ```bash
 kubectl config current-context
 kubectl get nodes -o wide
-kubectl -n kube-system get deploy metrics-server
-kubectl -n kube-system logs deploy/metrics-server --tail=120
-kubectl top nodes
-helm list -n monitoring
-kubectl -n monitoring get pods
-kubectl -n monitoring describe pod -l app.kubernetes.io/name=prometheus
+kubectl -n braza-burger get events --sort-by=.metadata.creationTimestamp
+kubectl -n braza-burger logs deploy/api-manager --tail=100
+kubectl -n braza-burger logs deploy/evolution-api --tail=100
 ```
 
-Erros comuns:
-- `InvalidImageName`: imagens com placeholder invalido ou nome mal formatado.
-- `ErrImagePull`: registry sem acesso, nome/tag incorreto, ou internet indisponivel no node.
-- `helm nao encontrado`: rode o script atualizado (ele tenta instalar via winget no Windows).
+Common errors:
+- InvalidImageName: image name/tag malformed.
+- ErrImagePull/ImagePullBackOff: registry auth or image/tag not found.
+- cert-manager checks failing: missing CRDs or missing ClusterIssuer.
+- 403 when pushing to GHCR: check repository Actions permissions and package write permissions.
 
-Acesso local por port-forward:
+## Public Documentation Policy
 
-```bash
-kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80
-kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090
-```
-
-Credencial padrao inicial do Grafana:
-- user: `admin`
-- password: `admin123`
-
-Troque a senha apos o primeiro acesso.
-
-## Ingress no mesmo dominio (app + api + evolution + observabilidade)
-
-O Ingress principal (`deploy/k8s/manifests/ingress.yaml`) agora expõe:
-- app: `app.seudominio.com`
-- api: `api.seudominio.com`
-- evolution: `evolution.seudominio.com`
-- grafana: `grafana.seudominio.com`
-- prometheus: `prometheus.seudominio.com`
-
-Para Grafana/Prometheus, foram adicionados serviços bridge em `braza-burger` que apontam para os serviços no namespace `monitoring`.
-
-## Notas importantes
-
-- CORS do `api_manager` está controlado por `ALLOWED_DOMAIN` no `.env`.
-  Exemplo:
-  `ALLOWED_DOMAIN=https://app.seudominio.com`
-- O `app_cliente` embute a URL da API no build (`--build-arg API_URL=...`).
-- Para TLS (HTTPS), instale cert-manager e adicione `tls` no Ingress.
-
-## Sobre KEDA / AI scaling
-
-- Melhor baseline para sua VPS: HPA (mais simples e estavel).
-- KEDA e excelente para escalonamento orientado a eventos (fila, kafka, rabbitmq, etc.).
-- "Digital Twin" e LSTM para autoscaling preditivo exigem stack de observabilidade e modelo de previsao; nao e o caminho mais seguro para primeiro deploy produtivo.
-
-Recomendacao pratica:
-1. Entrar em producao com HPA.
-2. Medir trafego e latencia por alguns dias.
-3. Evoluir para KEDA se houver workloads orientados a eventos.
+This README should stay template-based.
+Use only placeholders for all private values.
+If project-specific values are needed, keep them in private runbooks outside the repository.
