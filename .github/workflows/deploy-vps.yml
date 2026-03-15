@@ -246,6 +246,10 @@ jobs:
 
             echo "[remote] Using kubectl context: $KCTX"
 
+            KUBECONFIG_PATH="/tmp/remote-kubeconfig"
+            kubectl config view --raw > "$KUBECONFIG_PATH"
+            export KUBECONFIG="$KUBECONFIG_PATH"
+
             CERT_MANAGER_CRD="$(kubectl --context "$KCTX" get crd clusterissuers.cert-manager.io --ignore-not-found -o name 2>/dev/null || true)"
             case "$CERT_MANAGER_CRD" in
               "")
@@ -257,6 +261,7 @@ jobs:
                     helm repo add jetstack https://charts.jetstack.io --force-update
                     helm repo update
                     helm upgrade --install cert-manager jetstack/cert-manager \
+                      --kube-context "$KCTX" \
                       -n cert-manager \
                       --set crds.enabled=true \
                       --wait --timeout 15m
