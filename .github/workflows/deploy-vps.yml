@@ -148,7 +148,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            API_URL=${{ secrets.APP_API_URL }}
+            APP_API_URL=${{ secrets.APP_API_URL }}
           tags: |
             ${{ steps.vars.outputs.APP_IMAGE }}
             ${{ steps.vars.outputs.APP_IMAGE_LATEST }}
