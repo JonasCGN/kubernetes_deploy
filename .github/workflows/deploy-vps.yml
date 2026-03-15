@@ -172,14 +172,14 @@ jobs:
             PROJECT_DIR="${{ secrets.VPS_PROJECT_DIR || '$HOME/braza_burger' }}"
             BRANCH_NAME="${{ github.event.inputs.ref || github.ref_name }}"
             KCTX_INPUT="${{ github.event.inputs.kube_context || '' }}"
+            DEPLOY_MONITORING="${{ github.event.inputs.deploy_monitoring || 'false' }}"
+            GH_REPO_TOKEN_VALUE="${{ secrets.GH_REPO_TOKEN || '' }}"
+            REPO_URL="https://github.com/${{ github.repository }}.git"
+            REPO_URL="${GH_REPO_TOKEN_VALUE:+https://x-access-token:${GH_REPO_TOKEN_VALUE}@github.com/${{ github.repository }}.git}"
+            REPO_URL="${REPO_URL:-https://github.com/${{ github.repository }}.git}"
 
-            if [ ! -d "$PROJECT_DIR/.git" ]; then
-              if [ -n "${{ secrets.GH_REPO_TOKEN || '' }}" ]; then
-                git clone "https://x-access-token:${{ secrets.GH_REPO_TOKEN }}@github.com/${{ github.repository }}.git" "$PROJECT_DIR"
-              else
-                git clone "https://github.com/${{ github.repository }}.git" "$PROJECT_DIR"
-              fi
-            fi
+            rm -rf "$PROJECT_DIR"
+            git clone "$REPO_URL" "$PROJECT_DIR"
 
             cd "$PROJECT_DIR"
 
@@ -187,29 +187,14 @@ jobs:
             git checkout "$BRANCH_NAME"
             git reset --hard "origin/$BRANCH_NAME"
 
-            if [ -z "${K8S_API_MANAGER_ENV:-}" ]; then
-              echo "Missing GitHub Secret: K8S_API_MANAGER_ENV"
-              exit 1
-            fi
-
-            if [ -z "${K8S_EVOLUTION_ENV:-}" ]; then
-              echo "Missing GitHub Secret: K8S_EVOLUTION_ENV"
-              exit 1
-            fi
+            : "${K8S_API_MANAGER_ENV:?Missing GitHub Secret: K8S_API_MANAGER_ENV}"
+            : "${K8S_EVOLUTION_ENV:?Missing GitHub Secret: K8S_EVOLUTION_ENV}"
 
             for required_domain in APP_DOMAIN API_DOMAIN EVOLUTION_DOMAIN GRAFANA_DOMAIN PROMETHEUS_DOMAIN; do
-              eval "required_value=\${$required_domain:-}"
-              if [ -z "$required_value" ]; then
-                echo "Missing GitHub Secret: ${required_domain}"
-                exit 1
-              fi
+              eval ": \${$required_domain:?Missing GitHub Secret: $required_domain}"
             done
 
-            if [ -n "$KCTX_INPUT" ]; then
-              KCTX="$KCTX_INPUT"
-            else
-              KCTX="$(kubectl config current-context)"
-            fi
+            KCTX="${KCTX_INPUT:-$(kubectl config current-context)}"
 
             kubectl --context "$KCTX" get crd certificates.cert-manager.io >/dev/null 2>&1 || {
               echo "cert-manager CRDs not found in cluster"
@@ -233,7 +218,8 @@ jobs:
             printf '%s\n' "$K8S_API_MANAGER_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic api-manager-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
             printf '%s\n' "$K8S_EVOLUTION_ENV" | kubectl --context "$KCTX" -n braza-burger create secret generic evolution-env --from-env-file=/dev/stdin --dry-run=client -o yaml | kubectl --context "$KCTX" apply -f -
 
-            if [ "${{ github.event.inputs.deploy_monitoring || 'false' }}" = "true" ]; then
+            case "$DEPLOY_MONITORING" in
+              true)
               make k8s-apply-vps \
                 KUBE_CONTEXT="$KCTX" \
                 VPS_API_IMAGE="${{ steps.deploy_tags.outputs.API_DEPLOY_IMAGE }}" \
@@ -241,14 +227,16 @@ jobs:
                 VPS_EVOLUTION_IMAGE="${{ env.EVOLUTION_IMAGE }}"
               make k8s-monitor-vps KUBE_CONTEXT="$KCTX"
               make k8s-status-vps KUBE_CONTEXT="$KCTX"
-            else
+              ;;
+              *)
               make k8s-apply-vps \
                 KUBE_CONTEXT="$KCTX" \
                 VPS_API_IMAGE="${{ steps.deploy_tags.outputs.API_DEPLOY_IMAGE }}" \
                 VPS_APP_IMAGE="${{ steps.deploy_tags.outputs.APP_DEPLOY_IMAGE }}" \
                 VPS_EVOLUTION_IMAGE="${{ env.EVOLUTION_IMAGE }}"
               make k8s-status-vps KUBE_CONTEXT="$KCTX"
-            fi
+              ;;
+            esac
 
             kubectl --context "$KCTX" get pods -A
             kubectl --context "$KCTX" -n braza-burger get ingress
