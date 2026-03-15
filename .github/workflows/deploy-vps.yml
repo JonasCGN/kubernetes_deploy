@@ -173,7 +173,7 @@ jobs:
           script: |
             cat >/tmp/remote-deploy.sh <<'EOF_REMOTE_DEPLOY'
             #!/usr/bin/env bash
-            set -xeuo pipefail
+            set -euo pipefail
             trap 'rc=$?; echo "Remote deploy failed at line $LINENO: $BASH_COMMAND (exit $rc)"; exit $rc' ERR
 
             echo "[remote] Starting deploy script"
