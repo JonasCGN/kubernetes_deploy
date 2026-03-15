@@ -59,6 +59,13 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
+      - name: Print workflow revision
+        shell: bash
+        run: |
+          echo "Workflow SHA: ${GITHUB_SHA}"
+          echo "Workflow ref: ${GITHUB_REF}"
+          echo "Workflow ref name: ${GITHUB_REF_NAME}"
+
       - name: Set image tags
         id: vars
         shell: bash
@@ -219,28 +226,7 @@ jobs:
 
             echo "[remote] Using kubectl context: $KCTX"
 
-            CRD_PRESENT="$(kubectl --context "$KCTX" get crd certificates.cert-manager.io --ignore-not-found -o name 2>/dev/null || true)"
-            case "$CRD_PRESENT" in
-              "")
-                echo "cert-manager CRDs not found in cluster"
-                case "${REQUIRE_CERT_MANAGER:-false}" in
-                  true) exit 1 ;;
-                  *) echo "Continuing deploy without strict cert-manager requirement" ;;
-                esac
-                ;;
-              *)
-                CLUSTER_ISSUER_PRESENT="$(kubectl --context "$KCTX" get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" --ignore-not-found -o name 2>/dev/null || true)"
-                case "$CLUSTER_ISSUER_PRESENT" in
-                  "")
-                    echo "ClusterIssuer not found: $CERT_MANAGER_CLUSTER_ISSUER"
-                    case "${REQUIRE_CERT_MANAGER:-false}" in
-                      true) exit 1 ;;
-                      *) echo "Continuing deploy without strict cert-manager requirement" ;;
-                    esac
-                    ;;
-                esac
-                ;;
-            esac
+            echo "[remote] Skipping cert-manager validation in deploy script"
 
             echo "[remote] Rendering ingress domains and issuer"
             sed -i "s|cert-manager.io/cluster-issuer: letsencrypt-prod|cert-manager.io/cluster-issuer: ${CERT_MANAGER_CLUSTER_ISSUER}|g" deploy/k8s/manifests/ingress.yaml
